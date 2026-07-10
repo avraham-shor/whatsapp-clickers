@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: server/go.sum
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...
+      - name: sqlc generate diff-check
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+          sqlc generate
+          git diff --exit-code -- internal/store/gen
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: eslint
+        run: npm run lint
+      - name: typecheck
+        run: npx tsc -b --noEmit
+      - name: build
+        run: npm run build
+
+  filter-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No external URL assets (UX-DR4)
+        run: |
+          matches=$(grep -rnF --exclude-dir=node_modules --exclude-dir=dist \
+            -e 'url(http' \
+            -e 'src="http' \
+            -e "src='http" \
+            -e 'href="http' \
+            -e "href='http" \
+            -e '@import url(' \
+            -e 'fonts.googleapis' \
+            web/ || true)
+          if [ -n "$matches" ]; then
+            echo "External asset references found (filter-safety violation, UX-DR4):"
+            echo "$matches"
+            exit 1
+          fi
+          echo "filter-safety: clean"

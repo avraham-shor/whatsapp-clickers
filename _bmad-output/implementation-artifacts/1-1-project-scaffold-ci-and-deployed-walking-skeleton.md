@@ -22,45 +22,45 @@ so that every subsequent story builds and ships on working rails.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Repository baseline (AC: 1, 3)
-  - [ ] `git init` at project root; author `.gitignore` (Go binary output, `node_modules/`, `web/dist/`, `.env`, editor junk; do NOT ignore `_bmad*/`, `docs/` — planning artifacts stay in the repo)
-  - [ ] Delete the leftover `test.js` at project root (unrelated debris, 2026-07-09)
-  - [ ] Create the GitHub repository (`gh repo create`) and push `main` — required for CI and Railway auto-deploy
-- [ ] Task 2: Backend scaffold — `/server` (AC: 1, 2, 5)
-  - [ ] `mkdir server && cd server && go mod init github.com/<github-user>/whatsapp-clickers` (use the real GitHub path from Task 1)
-  - [ ] `go get github.com/go-chi/chi/v5 github.com/coder/websocket github.com/jackc/pgx/v5 github.com/pressly/goose/v3`
-  - [ ] `internal/config/config.go` — parse ALL env vars (list in Dev Notes), fail fast listing every missing var by name; `PORT` optional, default `8080`
-  - [ ] `cmd/server/main.go` — wire-up: slog JSON logger → config → pgx pool → goose migrations → chi router → `http.Server`
-  - [ ] `internal/httpapi/router.go` — chi mux: `GET /api/health` → 200 `{"status":"ok","db":"ok"}` (direct payload, camelCase); SPA static serving with `index.html` fallback for non-`/api`,`/ws`,`/webhooks` paths
-  - [ ] `internal/store/db.go` — pgx pool setup from `DATABASE_URL`
-  - [ ] Go unit tests: config fail-fast behavior; health handler returns 200 JSON
-- [ ] Task 3: Migrations + sqlc plumbing (AC: 3)
-  - [ ] `server/migrations/00001_init.sql` — no-op goose migration (`SELECT 1;` up/down) proving the pipeline; `migrations/embed.go` exposes `//go:embed *.sql` FS; `main.go` runs `goose.Up` via `SetBaseFS` at boot before serving
-  - [ ] `server/sqlc.yaml` — `sql_package: "pgx/v5"`, queries `internal/store/queries/`, schema `migrations/`, output `internal/store/gen/`
-  - [ ] `internal/store/queries/health.sql` — `-- name: Ping :one` / `SELECT 1;` — proves `sqlc generate` end-to-end; health handler calls it
-  - [ ] Run `sqlc generate`, commit `gen/` output
-- [ ] Task 4: Frontend scaffold — `/web` (AC: 1, 4)
-  - [ ] `npm create vite@latest web -- --template react-ts` (Node 22 LTS)
-  - [ ] Tailwind v4: `npm install tailwindcss @tailwindcss/vite`; add plugin to `vite.config.ts`; single `@import "tailwindcss";` in `index.css`
-  - [ ] Path aliases `@/*` → `./src/*` in `tsconfig.json` AND `tsconfig.app.json`, plus `resolve.alias` in `vite.config.ts` (shadcn prerequisite)
-  - [ ] `npx shadcn@latest init` (creates `components.json`, `src/components/ui/`, `src/lib/utils.ts`)
-  - [ ] Strip ALL Vite demo boilerplate (logos, `App.css`, counter demo)
-  - [ ] `index.html`: `<html lang="he" dir="rtl">`, Hebrew `<title>`, local favicon only
-  - [ ] `index.css`: DESIGN.md tokens as Tailwind v4 `@theme` CSS variables — exact values in Dev Notes (Festival Green + host-slate + semantic colors, radius, spacing, system-ui font stack, weights 900/800/600/500)
-  - [ ] `src/lib/strings.he.ts` — created now (may hold just the app title); Hebrew literals in components are forbidden from day one
-  - [ ] `vite.config.ts` dev proxy: `/api`, `/webhooks` → `http://localhost:8080`; `/ws` → same with `ws: true`
-- [ ] Task 5: Embed + production build (AC: 2)
-  - [ ] `server/internal/webdist/` package: `dist.go` with `//go:embed all:dist` exposing `fs.FS`; commit a placeholder `dist/index.html` so `go build`/`go vet`/`go test` pass without a frontend build
-  - [ ] `Makefile` targets: `dev` (Go :8080 + Vite :5173 concurrently), `build` (web build → copy `web/dist/*` into `server/internal/webdist/dist/` → `go build -o bin/server ./cmd/server`), `test`, `generate` (sqlc), `lint`
-  - [ ] Verify: `make build` then run binary with env vars → `/` serves the SPA, `/api/health` returns 200
-- [ ] Task 6: CI pipeline (AC: 3, 4)
-  - [ ] `.github/workflows/ci.yml` on PR + push to main: `go vet ./...`, `go test ./...`, `sqlc generate` + `git diff --exit-code` (pin sqlc version), `npm ci && npm run lint`, `tsc -b --noEmit`, `npm run build`
-  - [ ] Filter-safety grep step: fail if any file under `web/` other than `index.html`/`index.css` matches external-asset patterns (`url(http`, `src="http`, `href="http`, `@import url(`, `fonts.googleapis`) — and even those two files must reference no external asset in this story
-  - [ ] Go setup pinned to 1.26.x, Node to 22.x
-- [ ] Task 7: Railway deployment (AC: 3) — code half
-  - [ ] `railway.json`: build command = web build + copy + `go build`; start command = the binary; `numReplicas: 1` (MANDATORY — in-memory hub assumes single instance)
-  - [ ] `.env.example` at `/server` documenting: `DATABASE_URL`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `ANTHROPIC_API_KEY`, `SESSION_SECRET`, `PORT` — placeholder values, no secrets
-  - [ ] README runbook for the operator steps (see Task 8) + local dev setup (local Postgres via Docker, `make dev`, Windows notes)
+- [x] Task 1: Repository baseline (AC: 1, 3)
+  - [x] `git init` at project root; author `.gitignore` (Go binary output, `node_modules/`, `web/dist/`, `.env`, editor junk; do NOT ignore `_bmad*/`, `docs/` — planning artifacts stay in the repo)
+  - [x] Delete the leftover `test.js` at project root (unrelated debris, 2026-07-09)
+  - [x] Create the GitHub repository (`gh repo create`) and push `main` — required for CI and Railway auto-deploy
+- [x] Task 2: Backend scaffold — `/server` (AC: 1, 2, 5)
+  - [x] `mkdir server && cd server && go mod init github.com/<github-user>/whatsapp-clickers` (use the real GitHub path from Task 1)
+  - [x] `go get github.com/go-chi/chi/v5 github.com/coder/websocket github.com/jackc/pgx/v5 github.com/pressly/goose/v3`
+  - [x] `internal/config/config.go` — parse ALL env vars (list in Dev Notes), fail fast listing every missing var by name; `PORT` optional, default `8080`
+  - [x] `cmd/server/main.go` — wire-up: slog JSON logger → config → pgx pool → goose migrations → chi router → `http.Server`
+  - [x] `internal/httpapi/router.go` — chi mux: `GET /api/health` → 200 `{"status":"ok","db":"ok"}` (direct payload, camelCase); SPA static serving with `index.html` fallback for non-`/api`,`/ws`,`/webhooks` paths
+  - [x] `internal/store/db.go` — pgx pool setup from `DATABASE_URL`
+  - [x] Go unit tests: config fail-fast behavior; health handler returns 200 JSON
+- [x] Task 3: Migrations + sqlc plumbing (AC: 3)
+  - [x] `server/migrations/00001_init.sql` — no-op goose migration (`SELECT 1;` up/down) proving the pipeline; `migrations/embed.go` exposes `//go:embed *.sql` FS; `main.go` runs `goose.Up` via `SetBaseFS` at boot before serving
+  - [x] `server/sqlc.yaml` — `sql_package: "pgx/v5"`, queries `internal/store/queries/`, schema `migrations/`, output `internal/store/gen/`
+  - [x] `internal/store/queries/health.sql` — `-- name: Ping :one` / `SELECT 1;` — proves `sqlc generate` end-to-end; health handler calls it
+  - [x] Run `sqlc generate`, commit `gen/` output
+- [x] Task 4: Frontend scaffold — `/web` (AC: 1, 4)
+  - [x] `npm create vite@latest web -- --template react-ts` (Node 22 LTS)
+  - [x] Tailwind v4: `npm install tailwindcss @tailwindcss/vite`; add plugin to `vite.config.ts`; single `@import "tailwindcss";` in `index.css`
+  - [x] Path aliases `@/*` → `./src/*` in `tsconfig.json` AND `tsconfig.app.json`, plus `resolve.alias` in `vite.config.ts` (shadcn prerequisite)
+  - [x] `npx shadcn@latest init` (creates `components.json`, `src/components/ui/`, `src/lib/utils.ts`)
+  - [x] Strip ALL Vite demo boilerplate (logos, `App.css`, counter demo)
+  - [x] `index.html`: `<html lang="he" dir="rtl">`, Hebrew `<title>`, local favicon only
+  - [x] `index.css`: DESIGN.md tokens as Tailwind v4 `@theme` CSS variables — exact values in Dev Notes (Festival Green + host-slate + semantic colors, radius, spacing, system-ui font stack, weights 900/800/600/500)
+  - [x] `src/lib/strings.he.ts` — created now (may hold just the app title); Hebrew literals in components are forbidden from day one
+  - [x] `vite.config.ts` dev proxy: `/api`, `/webhooks` → `http://localhost:8080`; `/ws` → same with `ws: true`
+- [x] Task 5: Embed + production build (AC: 2)
+  - [x] `server/internal/webdist/` package: `dist.go` with `//go:embed all:dist` exposing `fs.FS`; commit a placeholder `dist/index.html` so `go build`/`go vet`/`go test` pass without a frontend build
+  - [x] `Makefile` targets: `dev` (Go :8080 + Vite :5173 concurrently), `build` (web build → copy `web/dist/*` into `server/internal/webdist/dist/` → `go build -o bin/server ./cmd/server`), `test`, `generate` (sqlc), `lint`
+  - [x] Verify: `make build` then run binary with env vars → `/` serves the SPA, `/api/health` returns 200
+- [x] Task 6: CI pipeline (AC: 3, 4)
+  - [x] `.github/workflows/ci.yml` on PR + push to main: `go vet ./...`, `go test ./...`, `sqlc generate` + `git diff --exit-code` (pin sqlc version), `npm ci && npm run lint`, `tsc -b --noEmit`, `npm run build`
+  - [x] Filter-safety grep step: fail if any file under `web/` other than `index.html`/`index.css` matches external-asset patterns (`url(http`, `src="http`, `href="http`, `@import url(`, `fonts.googleapis`) — and even those two files must reference no external asset in this story
+  - [x] Go setup pinned to 1.26.x, Node to 22.x
+- [x] Task 7: Railway deployment (AC: 3) — code half
+  - [x] `railway.json`: build command = web build + copy + `go build`; start command = the binary; `numReplicas: 1` (MANDATORY — in-memory hub assumes single instance)
+  - [x] `.env.example` at `/server` documenting: `DATABASE_URL`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `ANTHROPIC_API_KEY`, `SESSION_SECRET`, `PORT` — placeholder values, no secrets
+  - [x] README runbook for the operator steps (see Task 8) + local dev setup (local Postgres via Docker, `make dev`, Windows notes)
 - [ ] Task 8: Operator setup (HUMAN steps — document, do not fake) (AC: 3)
   - [ ] Railway: create project in **EU region**, one service linked to the GitHub repo (deploy on push to main, "wait for CI" enabled), add managed PostgreSQL, set env vars, confirm replicas = 1
   - [ ] Verify deployed URL: `/` serves SPA (RTL, Hebrew), `/api/health` → 200, boot logs show goose ran
