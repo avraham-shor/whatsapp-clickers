@@ -1,0 +1,220 @@
+<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Clickers — במת קהל: חשיפת תשובה</title>
+<style>
+/* ─────────────────────────────────────────────────────────────
+   GOVERNING SPINE SECTIONS — key-stage-reveal
+   DESIGN.md:
+     • components.stage-option-correct — fills success #15803D (reviewer-gate
+       delta, was #16A34A), ink-on-dark, ✓ icon inline-end, full opacity
+     • components.stage-option-dimmed — REVIEWER-GATE RE-SPEC: green-100
+       #D1FAE5 background, text-primary #14532D text (letter still bold 700),
+       full opacity — dim the fill, never the text (was green-800 @ 0.45)
+     • components.distribution-bar — horizontal bar per option; fill green-600
+       #16A34A, correct option's bar fills success #15803D; count + percent
+       label 48px (raised from 32px), text-secondary, tabular-nums, rendered
+       OUTSIDE the fill on the empty track side (never overlaid on the fill);
+       the correct bar's label carries a ✓; animate ~400ms, static under
+       prefers-reduced-motion (A10)
+     • components.split-hero — the game-state layout persists; timer at 0,
+       white ring (gold is countdown urgency only — urgency is over)
+     • Colors — semantic success is separate-in-kind from brand green:
+       a correct answer is a different kind of information
+     • Do's and Don'ts — success + ✓ icon, never color alone
+     • Typography — question 64px, options 40px, bar labels 48px,
+       hero labels 40px (new stage floor: nothing below 40px); Elevation — flat
+   EXPERIENCE.md:
+     • IA → Audience Display — stages: Reveal row (correct marked + distribution)
+     • Component Patterns → Audience Display stages: Reveal (correct option fills
+       success with ✓; wrong options dim; distribution-bar draws the room's
+       answer shape; no individual data on the shared screen)
+     • State Patterns → Question closed (timer at 0; options hold) + Reveal row
+     • Key Flows → Flow 5 (UJ-5) step 3: התשובה הנכונה נצבעת ירוק-הצלחה עם ✓;
+       פסי ההתפלגות מציירים את החדר ("רוב החדר אמר ג!")
+   .decision-log.md: #12 dramatic split; A9; A10 (bars animate ~400ms)
+   Data: 76 ענו — א 54 (71%) · ב 9 (12%) · ג 7 (9%) · ד 6 (8%)
+   Scaling: container-query units — 1cqw = 19.2px at the 1920px design width.
+   ───────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#111A27; color:#E4EDF8;
+  font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  padding:48px 24px 80px;
+}
+
+/* ── Page shell (not part of the stage) ── */
+.page-hd{text-align:center;margin-bottom:40px}
+.page-hd h1{font-size:clamp(1.2rem,2.6vw,1.7rem);font-weight:800}
+.page-hd p{color:#7A97BB;font-size:.85rem;margin-top:6px}
+.caption{text-align:center;color:#7A97BB;font-size:.78rem;margin-top:16px;line-height:1.6}
+
+/* ── Scalable 16:9 frame ── */
+.frame-shell{max-width:1680px;margin:0 auto;container-type:inline-size}
+.stage{
+  width:100%; aspect-ratio:16/9; overflow:hidden;
+  border-radius:10px; outline:1px solid rgba(255,255,255,.08);
+  display:flex; flex-direction:column;
+  background:#FFFFFF;
+}
+
+/* ── Split-hero band — timer at 0, final answer count ── */
+.hero{
+  background:#166534;
+  flex:0 0 35%; /* 30–35% band; 35% fits the raised 40px labels */
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:.5cqw;
+  padding:.8cqw 2.5cqw;
+  border-radius:0 0 .625cqw .625cqw;
+}
+.hero-prog{
+  font-size:2.0833cqw; /* 40px — raised from 32px, new stage floor */
+  font-weight:600; line-height:1.2;
+  color:rgba(255,255,255,.70);
+  font-variant-numeric:tabular-nums;
+}
+.hero-ring{
+  width:11.4583cqw; height:11.4583cqw; border-radius:50%;
+  border:.4167cqw solid rgba(255,255,255,.9);
+  display:flex; align-items:center; justify-content:center;
+  font-size:5cqw; font-weight:900; line-height:1; color:#FFFFFF;
+  font-variant-numeric:tabular-nums;
+}
+.hero-count{
+  font-size:2.0833cqw; /* 40px — raised from 32px, new stage floor */
+  font-weight:600; line-height:1.2;
+  color:rgba(255,255,255,.70);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ── Body: question holds, options carry reveal states + distribution ── */
+.q-body{
+  flex:1;
+  display:flex; flex-direction:column; justify-content:center;
+  padding:1.6667cqw 2.5cqw 2.5cqw;
+  gap:1.6667cqw;
+}
+.q-text{
+  font-size:3.3333cqw; font-weight:800; line-height:1.38;
+  color:#14532D; text-align:center; letter-spacing:0;
+}
+.rev-rows{display:flex;flex-direction:column;gap:.8333cqw}
+.rev-row{display:flex;align-items:center;gap:1.25cqw}
+
+/* stage-option base */
+.opt{
+  flex:0 0 44%;
+  min-height:5cqw;
+  background:#166534; color:#FFFFFF;
+  border-radius:.4167cqw;
+  display:flex; align-items:center; gap:.8333cqw;
+  padding:0 1.25cqw;
+  font-size:2.0833cqw; line-height:1.55;
+}
+.opt-letter{font-weight:700;min-width:2.2cqw}
+.opt-text{font-weight:500}
+
+/* stage-option-correct — success #15803D fill, ✓ inline-end, full opacity */
+.opt-correct{background:#15803D}
+.opt-check{margin-inline-start:auto;font-weight:700}
+
+/* stage-option-dimmed (re-spec) — green-100 fill, text-primary text,
+   full opacity: dim the fill, never the text */
+.opt-dim{background:#D1FAE5;color:#14532D}
+
+/* distribution-bar — the room's answer shape */
+.bar-track{
+  flex:1; height:1.25cqw;
+  background:#F0FDF4; /* light track — labels sit outside, on this empty side */
+  border-radius:9999px; overflow:hidden;
+  display:flex; /* RTL: fill anchors inline-start */
+}
+.bar-fill{
+  height:100%; border-radius:9999px;
+  background:#16A34A; /* green-600 — non-correct bars */
+  transform-origin:100% 50%;
+  animation:grow .4s ease-out both; /* A10: ~400ms entry */
+}
+.bar-fill-correct{background:#15803D} /* success — correct bar only */
+@keyframes grow{from{transform:scaleX(0)}}
+
+/* Label outside the fill, adjacent to the track's empty (inline-end) side —
+   never overlaid on the fill */
+.bar-label{
+  flex:0 0 13cqw;
+  font-size:2.5cqw; /* 48px — raised from 32px */
+  font-weight:600; line-height:1.2;
+  color:#4B5563; /* text-secondary */
+  font-variant-numeric:tabular-nums;
+  display:flex; align-items:center; gap:.6cqw;
+}
+.bar-label .lbl-check{font-weight:700} /* the correct bar's label carries ✓ */
+
+@media(prefers-reduced-motion:reduce){
+  .bar-fill{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="page-hd">
+  <h1>WhatsApp Clickers — במת קהל: חשיפת תשובה</h1>
+  <p>מסך מקרן 16:9 · עוצב ב-1920×1080 · ירוק חגיגה · כיוון ג — זירת הקרב</p>
+</div>
+
+<div class="frame-shell">
+  <div class="stage">
+    <div class="hero">
+      <div class="hero-prog">שאלה 3 מתוך 10</div>
+      <div class="hero-ring">0</div>
+      <div class="hero-count">76 ענו</div>
+    </div>
+    <div class="q-body">
+      <div class="q-text">מי היה ראש הממשלה הראשון של ישראל?</div>
+      <div class="rev-rows">
+
+        <div class="rev-row">
+          <div class="opt opt-correct">
+            <span class="opt-letter">א.</span><span class="opt-text">דוד בן גוריון</span>
+            <span class="opt-check">✓</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill bar-fill-correct" style="width:71%"></div></div>
+          <div class="bar-label"><span class="lbl-check">✓</span><span>54 · 71%</span></div>
+        </div>
+
+        <div class="rev-row">
+          <div class="opt opt-dim">
+            <span class="opt-letter">ב.</span><span class="opt-text">משה שרת</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:12%"></div></div>
+          <div class="bar-label">9 · 12%</div>
+        </div>
+
+        <div class="rev-row">
+          <div class="opt opt-dim">
+            <span class="opt-letter">ג.</span><span class="opt-text">חיים ויצמן</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:9%"></div></div>
+          <div class="bar-label">7 · 9%</div>
+        </div>
+
+        <div class="rev-row">
+          <div class="opt opt-dim">
+            <span class="opt-letter">ד.</span><span class="opt-text">לוי אשכול</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:8%"></div></div>
+          <div class="bar-label">6 · 8%</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="caption">חשיפה — א׳ נצבעת ירוק-הצלחה #15803D עם ✓ (צבע לעולם לא לבד); ב/ג/ד בירוק-100 באטימות מלאה — מעמעמים את המילוי, לא את הטקסט; תוויות ההתפלגות (48px) מחוץ למילוי, בצד הריק של המסילה, עם ✓ על תווית הפס הנכון. אף נתון אישי לא מופיע על המסך המשותף.</p>
+
+</body>
+</html>

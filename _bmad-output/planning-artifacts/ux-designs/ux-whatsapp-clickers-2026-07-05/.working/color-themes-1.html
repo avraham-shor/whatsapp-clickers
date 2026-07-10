@@ -1,0 +1,383 @@
+<title>WhatsApp Clickers — Color Themes</title>
+<style>
+/* ── Tokens ── */
+:root {
+  --bg: #C8D2DF;
+  --card: #FFFFFF;
+  --shadow: 0 1px 3px rgba(0,0,0,.07), 0 6px 22px rgba(0,0,0,.09);
+  --t1: #14213A;
+  --t2: #4E5F7A;
+  --t3: #8A97AE;
+  --div: #DCE3EE;
+  --sb: rgba(0,0,0,.11);
+  --strip: #EEF2F8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0C1118; --card: #16202F;
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 6px 22px rgba(0,0,0,.5);
+    --t1: #E6EDF8; --t2: #8098BC; --t3: #526078;
+    --div: #222E42; --sb: rgba(255,255,255,.11); --strip: #111A28;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #C8D2DF; --card: #FFFFFF;
+  --shadow: 0 1px 3px rgba(0,0,0,.07), 0 6px 22px rgba(0,0,0,.09);
+  --t1: #14213A; --t2: #4E5F7A; --t3: #8A97AE;
+  --div: #DCE3EE; --sb: rgba(0,0,0,.11); --strip: #EEF2F8;
+}
+:root[data-theme="dark"] {
+  --bg: #0C1118; --card: #16202F;
+  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 6px 22px rgba(0,0,0,.5);
+  --t1: #E6EDF8; --t2: #8098BC; --t3: #526078;
+  --div: #222E42; --sb: rgba(255,255,255,.11); --strip: #111A28;
+}
+
+/* ── Reset ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body {
+  background: var(--bg);
+  color: var(--t1);
+  font-family: system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  padding: 52px 20px 80px;
+}
+
+/* ── Page header ── */
+.ph { text-align:center; margin-bottom:48px; }
+.ph h1 {
+  font-size: clamp(1.35rem,3vw,1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  margin-bottom: 10px;
+}
+.ph p { color: var(--t2); font-size:.9rem; }
+
+/* ── Grid ── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(310px,1fr));
+  gap: 22px;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+/* ── Card ── */
+.card {
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.ch { padding: 20px 20px 14px; border-bottom: 1px solid var(--div); }
+.ch-he { font-size:1.3rem; font-weight:800; direction:rtl; margin-bottom:3px; }
+.ch-en {
+  font-size:.64rem; font-weight:600;
+  letter-spacing:.1em; text-transform:uppercase;
+  color:var(--t3); margin-bottom:7px;
+}
+.ch-reg { font-size:.8rem; direction:rtl; color:var(--t2); line-height:1.5; }
+
+/* Swatches */
+.sw {
+  display:flex; gap:7px; flex-wrap:wrap;
+  padding:13px 20px;
+  background:var(--strip);
+  border-bottom:1px solid var(--div);
+}
+.sw-i { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.sw-c {
+  width:32px; height:32px; border-radius:7px;
+  border:1px solid var(--sb); flex-shrink:0;
+}
+.sw-l { font-size:.56rem; text-align:center; color:var(--t3); line-height:1.2; max-width:36px; direction:rtl; }
+
+/* Hex strip */
+.hex {
+  padding:7px 20px 9px;
+  font-size:.6rem; color:var(--t3);
+  letter-spacing:.02em;
+  background:var(--strip);
+  border-bottom:1px solid var(--div);
+  overflow-x:auto; white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+
+/* Mockup wrap */
+.mw {
+  padding:22px 20px 24px;
+  display:flex; justify-content:center;
+  flex:1;
+}
+
+/* Phone */
+.phone {
+  width:234px;
+  border-radius:18px;
+  overflow:hidden;
+  box-shadow:0 4px 14px rgba(0,0,0,.2),0 1px 4px rgba(0,0,0,.12);
+  direction:rtl;
+}
+.pb { padding:10px 13px 8px; display:flex; justify-content:space-between; align-items:center; }
+.pb-t { font-size:.67rem; font-weight:700; }
+.pb-p { font-size:.62rem; opacity:.8; }
+.pm { padding:16px 13px 20px; }
+
+/* Timer */
+.tw { display:flex; justify-content:center; margin-bottom:14px; }
+.timer {
+  width:62px; height:62px; border-radius:50%;
+  border:5px solid;
+  display:flex; align-items:center; justify-content:center;
+  font-size:24px; font-weight:900;
+  line-height:1;
+}
+
+/* Question */
+.qt { font-size:.81rem; font-weight:700; text-align:center; line-height:1.45; margin-bottom:14px; direction:rtl; }
+
+/* Options */
+.opts { display:flex; flex-direction:column; gap:6px; }
+.opt {
+  padding:8px 11px; border-radius:8px;
+  font-size:.72rem; font-weight:500;
+  direction:rtl; text-align:right; border:1.5px solid;
+}
+
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="ph">
+  <h1>WhatsApp Clickers — בחירת צבעים</h1>
+  <p>6 כיוונים עם רגיסטר שונה — כל אחד מוצג על מסך השאלה הפעילה. אמור את המספר.</p>
+</div>
+
+<div class="grid">
+
+  <!-- ① כחול ים -->
+  <div class="card">
+    <div class="ch" style="color:#1D4ED8">
+      <div class="ch-he">① כחול ים</div>
+      <div class="ch-en">Sea Blue</div>
+      <div class="ch-reg" style="color:#475569">נקי, מקצועי, אמין — פלטפורמה שמדברת ברצינות</div>
+    </div>
+    <div class="sw">
+      <div class="sw-i"><div class="sw-c" style="background:#FFFFFF;border-color:#CBD5E1" title="#FFFFFF"></div><div class="sw-l">רקע</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#EFF6FF" title="#EFF6FF"></div><div class="sw-l">משטח</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#1D4ED8" title="#1D4ED8"></div><div class="sw-l">ראשי</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#38BDF8" title="#38BDF8"></div><div class="sw-l">הדגשה</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#0F172A" title="#0F172A"></div><div class="sw-l">טקסט</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#475569" title="#475569"></div><div class="sw-l">משני</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#22C55E" title="#22C55E"></div><div class="sw-l">נכון</div></div>
+    </div>
+    <div class="hex">#FFFFFF · #EFF6FF · #1D4ED8 · #38BDF8 · #0F172A · #475569 · #22C55E</div>
+    <div class="mw" style="background:#E0EAF7">
+      <div class="phone" style="background:#FFFFFF">
+        <div class="pb" style="background:#1D4ED8;color:#fff">
+          <div class="pb-t">WhatsApp Clickers</div>
+          <div class="pb-p">שאלה 3/10</div>
+        </div>
+        <div class="pm">
+          <div class="tw"><div class="timer" style="border-color:#1D4ED8;color:#1D4ED8">12</div></div>
+          <div class="qt" style="color:#0F172A">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="opts">
+            <div class="opt" style="background:#EFF6FF;border-color:#BFDBFE;color:#1E3A8A">א. דוד בן גוריון</div>
+            <div class="opt" style="background:#EFF6FF;border-color:#BFDBFE;color:#1E3A8A">ב. חיים וייצמן</div>
+            <div class="opt" style="background:#EFF6FF;border-color:#BFDBFE;color:#1E3A8A">ג. משה שרת</div>
+            <div class="opt" style="background:#EFF6FF;border-color:#BFDBFE;color:#1E3A8A">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② ענבר משפחתי -->
+  <div class="card">
+    <div class="ch" style="color:#B45309">
+      <div class="ch-he">② ענבר משפחתי</div>
+      <div class="ch-en">Family Amber</div>
+      <div class="ch-reg" style="color:#57534E">חמים, ביתי, גיבוש — "סבא מנצח" נראה טבעי כאן</div>
+    </div>
+    <div class="sw">
+      <div class="sw-i"><div class="sw-c" style="background:#FFFBEB;border-color:#FDE68A" title="#FFFBEB"></div><div class="sw-l">רקע</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#FFFFFF;border-color:#E7D8B0" title="#FFFFFF"></div><div class="sw-l">משטח</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#D97706" title="#D97706"></div><div class="sw-l">ראשי</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#F59E0B" title="#F59E0B"></div><div class="sw-l">הדגשה</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#1C1917" title="#1C1917"></div><div class="sw-l">טקסט</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#78716C" title="#78716C"></div><div class="sw-l">משני</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#16A34A" title="#16A34A"></div><div class="sw-l">נכון</div></div>
+    </div>
+    <div class="hex">#FFFBEB · #FFFFFF · #D97706 · #F59E0B · #1C1917 · #78716C · #16A34A</div>
+    <div class="mw" style="background:#F5E6B8">
+      <div class="phone" style="background:#FFFBEB">
+        <div class="pb" style="background:#D97706;color:#fff">
+          <div class="pb-t">WhatsApp Clickers</div>
+          <div class="pb-p">שאלה 3/10</div>
+        </div>
+        <div class="pm">
+          <div class="tw"><div class="timer" style="border-color:#D97706;color:#D97706">12</div></div>
+          <div class="qt" style="color:#1C1917">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="opts">
+            <div class="opt" style="background:#FFFFFF;border-color:#FDE68A;color:#78350F">א. דוד בן גוריון</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#FDE68A;color:#78350F">ב. חיים וייצמן</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#FDE68A;color:#78350F">ג. משה שרת</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#FDE68A;color:#78350F">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ ירוק חגיגה -->
+  <div class="card">
+    <div class="ch" style="color:#166534">
+      <div class="ch-he">③ ירוק חגיגה</div>
+      <div class="ch-en">Festival Green</div>
+      <div class="ch-reg" style="color:#374151">חגיגי, ישראלי, עונתי — זהב על ירוק = חנוכה, פסח, ראש השנה</div>
+    </div>
+    <div class="sw">
+      <div class="sw-i"><div class="sw-c" style="background:#F0FDF4;border-color:#BBF7D0" title="#F0FDF4"></div><div class="sw-l">רקע</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#FFFFFF;border-color:#D1FAE5" title="#FFFFFF"></div><div class="sw-l">משטח</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#166534" title="#166534"></div><div class="sw-l">ראשי</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#16A34A" title="#16A34A"></div><div class="sw-l">הדגשה</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#14532D" title="#14532D"></div><div class="sw-l">טקסט</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#4B5563" title="#4B5563"></div><div class="sw-l">משני</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#FBBF24" title="#FBBF24"></div><div class="sw-l">זהב</div></div>
+    </div>
+    <div class="hex">#F0FDF4 · #FFFFFF · #166534 · #16A34A · #14532D · #4B5563 · #FBBF24</div>
+    <div class="mw" style="background:#C6EDD4">
+      <div class="phone" style="background:#F0FDF4">
+        <div class="pb" style="background:#166534;color:#fff">
+          <div class="pb-t">WhatsApp Clickers</div>
+          <div class="pb-p">שאלה 3/10</div>
+        </div>
+        <div class="pm">
+          <div class="tw"><div class="timer" style="border-color:#16A34A;color:#166534">12</div></div>
+          <div class="qt" style="color:#14532D">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="opts">
+            <div class="opt" style="background:#FFFFFF;border-color:#86EFAC;color:#14532D">א. דוד בן גוריון</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#86EFAC;color:#14532D">ב. חיים וייצמן</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#86EFAC;color:#14532D">ג. משה שרת</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#86EFAC;color:#14532D">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ סגול אירוע -->
+  <div class="card">
+    <div class="ch" style="color:#7C3AED">
+      <div class="ch-he">④ סגול אירוע</div>
+      <div class="ch-en">Event Purple</div>
+      <div class="ch-reg" style="color:#4B5563">דרמטי, אירועי, מיוחד — זהב על סגול במסך הניצחון</div>
+    </div>
+    <div class="sw">
+      <div class="sw-i"><div class="sw-c" style="background:#FFFFFF;border-color:#E5E7EB" title="#FFFFFF"></div><div class="sw-l">רקע</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#FAF5FF" title="#FAF5FF"></div><div class="sw-l">משטח</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#7C3AED" title="#7C3AED"></div><div class="sw-l">ראשי</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#A855F7" title="#A855F7"></div><div class="sw-l">הדגשה</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#1A1A2E" title="#1A1A2E"></div><div class="sw-l">טקסט</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#6B7280" title="#6B7280"></div><div class="sw-l">משני</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#FBBF24" title="#FBBF24"></div><div class="sw-l">זהב</div></div>
+    </div>
+    <div class="hex">#FFFFFF · #FAF5FF · #7C3AED · #A855F7 · #1A1A2E · #6B7280 · #FBBF24</div>
+    <div class="mw" style="background:#E0D4F7">
+      <div class="phone" style="background:#FFFFFF">
+        <div class="pb" style="background:#7C3AED;color:#fff">
+          <div class="pb-t">WhatsApp Clickers</div>
+          <div class="pb-p">שאלה 3/10</div>
+        </div>
+        <div class="pm">
+          <div class="tw"><div class="timer" style="border-color:#7C3AED;color:#7C3AED">12</div></div>
+          <div class="qt" style="color:#1A1A2E">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="opts">
+            <div class="opt" style="background:#FAF5FF;border-color:#DDD6FE;color:#4C1D95">א. דוד בן גוריון</div>
+            <div class="opt" style="background:#FAF5FF;border-color:#DDD6FE;color:#4C1D95">ב. חיים וייצמן</div>
+            <div class="opt" style="background:#FAF5FF;border-color:#DDD6FE;color:#4C1D95">ג. משה שרת</div>
+            <div class="opt" style="background:#FAF5FF;border-color:#DDD6FE;color:#4C1D95">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑤ כתום אנרגיה -->
+  <div class="card">
+    <div class="ch" style="color:#C2410C">
+      <div class="ch-he">⑤ כתום אנרגיה</div>
+      <div class="ch-en">Energy Orange</div>
+      <div class="ch-reg" style="color:#4B5563">אנרגטי, נמרץ, מהיר — הטיימר הדרמטי שביקשת גר כאן</div>
+    </div>
+    <div class="sw">
+      <div class="sw-i"><div class="sw-c" style="background:#FFFFFF;border-color:#E5E7EB" title="#FFFFFF"></div><div class="sw-l">רקע</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#FFF7ED" title="#FFF7ED"></div><div class="sw-l">משטח</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#EA580C" title="#EA580C"></div><div class="sw-l">ראשי</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#F97316" title="#F97316"></div><div class="sw-l">הדגשה</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#1A1A1A" title="#1A1A1A"></div><div class="sw-l">טקסט</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#6B7280" title="#6B7280"></div><div class="sw-l">משני</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#22C55E" title="#22C55E"></div><div class="sw-l">נכון</div></div>
+    </div>
+    <div class="hex">#FFFFFF · #FFF7ED · #EA580C · #F97316 · #1A1A1A · #6B7280 · #22C55E</div>
+    <div class="mw" style="background:#F5D7B8">
+      <div class="phone" style="background:#FFFFFF">
+        <div class="pb" style="background:#EA580C;color:#fff">
+          <div class="pb-t">WhatsApp Clickers</div>
+          <div class="pb-p">שאלה 3/10</div>
+        </div>
+        <div class="pm">
+          <div class="tw"><div class="timer" style="border-color:#EA580C;color:#EA580C">12</div></div>
+          <div class="qt" style="color:#1A1A1A">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="opts">
+            <div class="opt" style="background:#FFF7ED;border-color:#FED7AA;color:#7C2D12">א. דוד בן גוריון</div>
+            <div class="opt" style="background:#FFF7ED;border-color:#FED7AA;color:#7C2D12">ב. חיים וייצמן</div>
+            <div class="opt" style="background:#FFF7ED;border-color:#FED7AA;color:#7C2D12">ג. משה שרת</div>
+            <div class="opt" style="background:#FFF7ED;border-color:#FED7AA;color:#7C2D12">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑥ אפור מודרני -->
+  <div class="card">
+    <div class="ch" style="color:#0F172A">
+      <div class="ch-he">⑥ אפור מודרני</div>
+      <div class="ch-en">Modern Slate</div>
+      <div class="ch-reg" style="color:#4B5563">מינימליסטי, נקי, אלגנטי — הכתום פורץ רק בטיימר, שאר המסך שקט</div>
+    </div>
+    <div class="sw">
+      <div class="sw-i"><div class="sw-c" style="background:#F8FAFC;border-color:#E2E8F0" title="#F8FAFC"></div><div class="sw-l">רקע</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#FFFFFF;border-color:#E2E8F0" title="#FFFFFF"></div><div class="sw-l">משטח</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#0F172A" title="#0F172A"></div><div class="sw-l">ראשי</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#F97316" title="#F97316"></div><div class="sw-l">הדגשה</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#0F172A" title="#0F172A"></div><div class="sw-l">טקסט</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#64748B" title="#64748B"></div><div class="sw-l">משני</div></div>
+      <div class="sw-i"><div class="sw-c" style="background:#22C55E" title="#22C55E"></div><div class="sw-l">נכון</div></div>
+    </div>
+    <div class="hex">#F8FAFC · #FFFFFF · #0F172A · #F97316 · #0F172A · #64748B · #22C55E</div>
+    <div class="mw" style="background:#D4DCE8">
+      <div class="phone" style="background:#F8FAFC">
+        <div class="pb" style="background:#0F172A;color:#fff">
+          <div class="pb-t">WhatsApp Clickers</div>
+          <div class="pb-p">שאלה 3/10</div>
+        </div>
+        <div class="pm">
+          <div class="tw"><div class="timer" style="border-color:#F97316;color:#F97316">12</div></div>
+          <div class="qt" style="color:#0F172A">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="opts">
+            <div class="opt" style="background:#FFFFFF;border-color:#E2E8F0;color:#0F172A">א. דוד בן גוריון</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#E2E8F0;color:#0F172A">ב. חיים וייצמן</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#E2E8F0;color:#0F172A">ג. משה שרת</div>
+            <div class="opt" style="background:#FFFFFF;border-color:#E2E8F0;color:#0F172A">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

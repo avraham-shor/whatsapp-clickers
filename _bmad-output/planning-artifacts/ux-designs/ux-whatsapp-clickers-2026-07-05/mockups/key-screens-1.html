@@ -1,0 +1,519 @@
+<title>WhatsApp Clickers — Key Screens</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body {
+  background: #111A27;
+  color: #E4EDF8;
+  font-family: system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  padding: 52px 20px 80px;
+  direction: rtl;
+}
+
+/* ── Page header ── */
+.page-hd { text-align:center; margin-bottom:56px; }
+.page-hd h1 { font-size:clamp(1.3rem,3vw,1.8rem); font-weight:800; letter-spacing:-.02em; margin-bottom:8px; }
+.page-hd p { color:#7A97BB; font-size:.88rem; }
+
+/* ── Section ── */
+.section { margin-bottom:72px; }
+.section-lbl {
+  font-size:.64rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+  color:#4E6A8A; margin-bottom:28px; text-align:center;
+  display:flex; align-items:center; gap:12px; justify-content:center;
+}
+.section-lbl::before,.section-lbl::after { content:''; flex:1; height:1px; background:#1E2E42; max-width:120px; }
+
+/* ── Phone showcase ── */
+.phones {
+  display:flex; gap:48px; justify-content:center; flex-wrap:wrap;
+  align-items:flex-start;
+}
+.phone-col { display:flex; flex-direction:column; align-items:center; gap:14px; }
+.phone-label { font-size:.72rem; color:#7A97BB; font-weight:600; text-align:center; direction:rtl; }
+
+/* ── Phone frame ── */
+.phone {
+  width:272px;
+  border-radius:28px;
+  overflow:hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 8px 32px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
+  direction:rtl;
+  position:relative;
+}
+
+/* ── SCREEN A: Active Question ── */
+/* Split hero — green top */
+.aq-hero {
+  background:#166534;
+  padding:20px 18px 24px;
+  display:flex; flex-direction:column; align-items:center; gap:10px;
+}
+.aq-hero-top {
+  width:100%;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.aq-prog { font-size:.64rem; color:rgba(255,255,255,.65); font-weight:600; direction:rtl; }
+.aq-brand { font-size:.6rem; color:rgba(255,255,255,.4); font-weight:600; letter-spacing:.04em; }
+
+.aq-timer-ring {
+  width:78px; height:78px; border-radius:50%;
+  border:4px solid rgba(255,255,255,.88);
+  display:flex; align-items:center; justify-content:center;
+  font-size:30px; font-weight:900; color:#fff;
+}
+.aq-timer-label { font-size:.58rem; color:rgba(255,255,255,.55); letter-spacing:.06em; text-transform:uppercase; }
+
+/* Body */
+.aq-body { background:#fff; padding:18px 16px 22px; }
+.aq-q {
+  font-size:.88rem; font-weight:800; line-height:1.42;
+  text-align:center; color:#14532D; margin-bottom:18px; direction:rtl;
+}
+.aq-opts { display:flex; flex-direction:column; gap:8px; }
+.aq-opt {
+  padding:12px 14px;
+  border-radius:8px;
+  background:#166534; color:#fff;
+  font-size:.76rem; direction:rtl; text-align:right;
+  display:flex; align-items:center; gap:8px;
+}
+.aq-opt-letter { font-weight:800; flex-shrink:0; min-width:18px; }
+.aq-opt-text { font-weight:500; }
+
+/* Selected option variant */
+.aq-opt-selected {
+  background:#fff !important; color:#14532D !important;
+  border:2.5px solid #FBBF24 !important;
+}
+.aq-opt-selected .aq-opt-letter { color:#14532D; }
+
+/* ── SCREEN B: Winner Screen ── */
+.winner {
+  background:#166534;
+  min-height:540px;
+  position:relative; overflow:hidden;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:32px 20px;
+  gap:4px;
+}
+
+/* Confetti pieces */
+.confetti-wrap { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.cf {
+  position:absolute;
+  border-radius:2px;
+  animation:fall linear infinite;
+}
+@keyframes fall {
+  0%   { transform:translateY(-20px) rotate(0deg); opacity:1; }
+  100% { transform:translateY(560px) rotate(360deg); opacity:0.3; }
+}
+
+.w-crown {
+  width:44px; height:44px; margin-bottom:8px;
+  display:flex; align-items:center; justify-content:center;
+}
+/* SVG crown — geometric, filter-safe */
+.w-tagline {
+  font-size:.68rem; color:rgba(255,255,255,.7); font-weight:600;
+  letter-spacing:.08em; text-transform:uppercase; margin-bottom:12px; direction:rtl;
+}
+.w-name {
+  font-size:2rem; font-weight:900; color:#FBBF24;
+  line-height:1.1; text-align:center; direction:rtl;
+  text-shadow:0 2px 12px rgba(0,0,0,.3);
+}
+.w-score {
+  font-size:1rem; font-weight:700; color:rgba(255,255,255,.8);
+  margin-top:6px; direction:rtl;
+  font-variant-numeric:tabular-nums;
+}
+.w-sub {
+  font-size:.72rem; color:rgba(255,255,255,.5); margin-top:4px; direction:rtl;
+}
+.w-divider {
+  width:60px; height:2px; background:rgba(255,215,0,.3); border-radius:2px; margin:16px 0;
+}
+.w-brand {
+  position:absolute; bottom:20px;
+  font-size:.6rem; color:rgba(255,255,255,.35); letter-spacing:.06em;
+}
+
+/* ── HOST CONTROL PANEL ── */
+.host-wrap {
+  max-width:900px;
+  margin:0 auto;
+}
+
+.browser-frame {
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow:0 0 0 1px rgba(255,255,255,.06), 0 12px 48px rgba(0,0,0,.55);
+}
+
+.browser-chrome {
+  background:#1E2A38;
+  padding:10px 16px;
+  display:flex; align-items:center; gap:10px;
+  border-bottom:1px solid #0E1620;
+}
+.browser-dots { display:flex; gap:5px; }
+.browser-dot { width:10px; height:10px; border-radius:50%; }
+.browser-url {
+  flex:1; background:#0E1620; border-radius:6px;
+  padding:4px 12px; font-size:.65rem; color:#4E6A8A;
+  text-align:center; direction:ltr;
+}
+
+/* App chrome */
+.app-chrome {
+  background:#F8FAFC;
+  direction:rtl;
+  min-height:500px;
+}
+
+/* Top nav */
+.host-nav {
+  background:#fff;
+  border-bottom:1px solid #E2E8F0;
+  padding:0 24px;
+  height:52px;
+  display:flex; align-items:center; justify-content:space-between;
+  direction:rtl;
+}
+.host-nav-brand { font-size:.85rem; font-weight:800; color:#14532D; }
+.host-nav-meta { font-size:.75rem; color:#64748B; display:flex; align-items:center; gap:12px; }
+.host-nav-badge {
+  background:#F0FDF4; color:#166534; border:1px solid #D1FAE5;
+  border-radius:9999px; padding:2px 10px; font-size:.68rem; font-weight:600;
+}
+.host-nav-end { display:flex; align-items:center; gap:10px; }
+.host-btn-ghost { font-size:.72rem; color:#64748B; cursor:pointer; padding:4px 10px; border-radius:6px; }
+
+/* Main layout */
+.host-main {
+  display:grid; grid-template-columns:1fr 300px;
+  gap:0; min-height:448px;
+}
+
+/* Left: question panel */
+.host-q-panel {
+  padding:28px 28px 24px;
+  border-left:1px solid #E2E8F0;
+}
+.host-q-label {
+  font-size:.64rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:#94A3B8; margin-bottom:10px; direction:rtl;
+}
+.host-q-text {
+  font-size:1.05rem; font-weight:800; color:#0F172A; line-height:1.45;
+  margin-bottom:22px; direction:rtl;
+}
+.host-q-opts { display:flex; flex-direction:column; gap:8px; }
+.host-q-opt {
+  padding:10px 14px;
+  border-radius:8px;
+  background:#F8FAFC; border:1px solid #E2E8F0;
+  border-inline-start:4px solid #D1FAE5;
+  font-size:.8rem; color:#374151; direction:rtl; text-align:right;
+  display:flex; align-items:center; gap:8px;
+}
+.host-q-opt-letter { font-weight:700; color:#166534; min-width:18px; }
+/* Highlight the answer distribution */
+.host-q-opt-bar {
+  height:3px; background:#D1FAE5; border-radius:2px; flex:1; position:relative; overflow:hidden;
+}
+.host-q-opt-bar-fill { position:absolute; inset:0 auto 0 0; background:#16A34A; border-radius:2px; }
+.host-q-opt-count { font-size:.64rem; color:#64748B; font-weight:600; flex-shrink:0; font-variant-numeric:tabular-nums; }
+
+/* Right: control panel */
+.host-ctrl {
+  background:#fff;
+  padding:24px;
+  display:flex; flex-direction:column; gap:16px;
+  direction:rtl;
+}
+.host-ctrl-lbl { font-size:.64rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:#94A3B8; }
+
+.host-stat-row { display:flex; gap:8px; flex-wrap:wrap; }
+.host-stat-pill {
+  background:#F0FDF4; color:#166534; border:1px solid #D1FAE5;
+  border-radius:9999px; padding:5px 12px; font-size:.72rem; font-weight:700;
+  display:flex; align-items:center; gap:4px;
+}
+.host-stat-pill-dot { width:6px; height:6px; border-radius:50%; background:#16A34A; }
+.host-stat-secondary { font-size:.72rem; color:#64748B; }
+
+.host-response-detail {
+  background:#F8FAFC; border-radius:8px; padding:12px 14px;
+  border:1px solid #E2E8F0;
+}
+.host-resp-row {
+  display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:.72rem; direction:rtl;
+}
+.host-resp-row:last-child { margin-bottom:0; }
+.host-resp-letter { font-weight:700; color:#166534; min-width:16px; }
+.host-resp-bar { flex:1; height:6px; background:#E2E8F0; border-radius:3px; overflow:hidden; }
+.host-resp-fill { height:100%; border-radius:3px; background:#16A34A; }
+.host-resp-n { font-size:.65rem; color:#64748B; font-weight:600; font-variant-numeric:tabular-nums; min-width:24px; text-align:left; direction:ltr; }
+
+.host-timer-inline {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px; background:#F8FAFC; border-radius:8px; border:1px solid #E2E8F0;
+}
+.host-timer-ring-small {
+  width:38px; height:38px; border-radius:50%;
+  border:3px solid #FBBF24;
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; font-weight:900; color:#166534;
+  flex-shrink:0;
+}
+.host-timer-text { font-size:.75rem; color:#374151; }
+.host-timer-text strong { color:#0F172A; font-weight:700; }
+
+.host-cta {
+  background:#166534; color:#fff;
+  padding:14px 20px; border-radius:8px; border:none;
+  font-size:.88rem; font-weight:800; cursor:pointer;
+  text-align:center; width:100%; direction:rtl;
+  margin-top:auto;
+  box-shadow:0 2px 8px rgba(22,101,52,.3);
+}
+.host-cta-sub { font-size:.65rem; color:rgba(255,255,255,.65); margin-top:4px; }
+
+@media(prefers-color-scheme:dark){
+  /* The key screens are product screens — they stay in their defined palette.
+     Only page shell adapts. Body bg is already dark. */
+}
+@media(prefers-reduced-motion:reduce){
+  .cf { animation:none; opacity:0.4; }
+}
+</style>
+
+<!-- Page Header -->
+<div class="page-hd">
+  <h1>WhatsApp Clickers — מסכי מפתח</h1>
+  <p>מוקאפים סופיים — כיוון ג + אפשרויות כיוון א · ירוק חגיגה</p>
+</div>
+
+<!-- ── Section 1: Participant Screens ── -->
+<div class="section">
+  <div class="section-lbl">מסכי המשתתף — מובייל</div>
+  <div class="phones">
+
+    <!-- Phone A: Active Question -->
+    <div class="phone-col">
+      <div class="phone">
+        <!-- Split hero -->
+        <div class="aq-hero">
+          <div class="aq-hero-top">
+            <div class="aq-prog">שאלה 3 מתוך 10</div>
+            <div class="aq-brand">WhatsApp Clickers</div>
+          </div>
+          <div class="aq-timer-ring">12</div>
+          <div class="aq-timer-label">שניות נותרו</div>
+        </div>
+        <!-- Body -->
+        <div class="aq-body">
+          <div class="aq-q">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="aq-opts">
+            <div class="aq-opt">
+              <span class="aq-opt-letter">א.</span>
+              <span class="aq-opt-text">דוד בן גוריון</span>
+            </div>
+            <div class="aq-opt aq-opt-selected">
+              <span class="aq-opt-letter">ב.</span>
+              <span class="aq-opt-text">חיים וייצמן</span>
+            </div>
+            <div class="aq-opt">
+              <span class="aq-opt-letter">ג.</span>
+              <span class="aq-opt-text">משה שרת</span>
+            </div>
+            <div class="aq-opt">
+              <span class="aq-opt-letter">ד.</span>
+              <span class="aq-opt-text">לוי אשכול</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="phone-label">שאלה פעילה — הוגשה (ממתין לגילוי)</div>
+    </div>
+
+    <!-- Phone B: Winner Screen -->
+    <div class="phone-col">
+      <div class="phone">
+        <div class="winner">
+          <!-- Confetti -->
+          <div class="confetti-wrap">
+            <div class="cf" style="width:8px;height:8px;background:#FBBF24;border-radius:50%;left:15%;top:-10px;animation-duration:3.2s;animation-delay:0s;"></div>
+            <div class="cf" style="width:6px;height:12px;background:#16A34A;left:25%;top:-10px;animation-duration:2.8s;animation-delay:.4s;"></div>
+            <div class="cf" style="width:10px;height:10px;background:#FBBF24;border-radius:50%;left:40%;top:-10px;animation-duration:3.5s;animation-delay:.8s;"></div>
+            <div class="cf" style="width:5px;height:10px;background:rgba(255,255,255,.6);left:55%;top:-10px;animation-duration:2.6s;animation-delay:.2s;"></div>
+            <div class="cf" style="width:8px;height:8px;background:#FBBF24;left:70%;top:-10px;animation-duration:3.1s;animation-delay:1s;"></div>
+            <div class="cf" style="width:6px;height:6px;background:#16A34A;border-radius:50%;left:80%;top:-10px;animation-duration:2.9s;animation-delay:.6s;"></div>
+            <div class="cf" style="width:9px;height:5px;background:#FBBF24;left:10%;top:-10px;animation-duration:3.4s;animation-delay:1.2s;"></div>
+            <div class="cf" style="width:7px;height:7px;background:rgba(255,255,255,.5);border-radius:50%;left:60%;top:-10px;animation-duration:2.7s;animation-delay:.3s;"></div>
+            <div class="cf" style="width:5px;height:12px;background:#FBBF24;left:35%;top:-10px;animation-duration:3.3s;animation-delay:.9s;"></div>
+            <div class="cf" style="width:8px;height:8px;background:#16A34A;left:88%;top:-10px;animation-duration:2.5s;animation-delay:1.4s;"></div>
+            <div class="cf" style="width:6px;height:6px;background:#FBBF24;border-radius:50%;left:50%;top:-10px;animation-duration:3.6s;animation-delay:.1s;"></div>
+            <div class="cf" style="width:10px;height:6px;background:rgba(255,255,255,.4);left:20%;top:-10px;animation-duration:3s;animation-delay:1.6s;"></div>
+          </div>
+
+          <!-- Crown (geometric SVG) -->
+          <svg width="42" height="34" viewBox="0 0 42 34" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom:6px">
+            <polygon points="21,2 6,18 1,8 1,32 41,32 41,8 36,18" fill="#FBBF24"/>
+            <circle cx="21" cy="2" r="3" fill="#FBBF24"/>
+            <circle cx="1" cy="8" r="3" fill="#FBBF24"/>
+            <circle cx="41" cy="8" r="3" fill="#FBBF24"/>
+          </svg>
+
+          <div class="w-tagline">מנצח.ת</div>
+          <div class="w-name">משה כהן</div>
+          <div class="w-divider"></div>
+          <div class="w-score">1,240 נקודות</div>
+          <div class="w-sub">10 שאלות · 3 בונוסי מהירות</div>
+          <div class="w-brand">WhatsApp Clickers</div>
+        </div>
+      </div>
+      <div class="phone-label">מסך ניצחון — "סבא מנצח"</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Section 2: Host Dashboard ── -->
+<div class="section">
+  <div class="section-lbl">דשבורד המארגן — לפטופ</div>
+  <div class="host-wrap">
+    <div class="browser-frame">
+      <!-- Browser chrome -->
+      <div class="browser-chrome">
+        <div class="browser-dots">
+          <div class="browser-dot" style="background:#FF5F57"></div>
+          <div class="browser-dot" style="background:#FEBC2E"></div>
+          <div class="browser-dot" style="background:#28C840"></div>
+        </div>
+        <div class="browser-url">app.whatsapp-clickers.co.il/live/SHLOMI1</div>
+      </div>
+
+      <!-- App -->
+      <div class="app-chrome">
+        <!-- Top nav -->
+        <div class="host-nav">
+          <div class="host-nav-brand">WhatsApp Clickers</div>
+          <div class="host-nav-meta">
+            <span>יום גיבוש חברת טכנולוגיה</span>
+            <span class="host-nav-badge">
+              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#16A34A;margin-left:4px;vertical-align:middle;"></span>
+              משחק פעיל
+            </span>
+          </div>
+          <div class="host-nav-end">
+            <span class="host-btn-ghost">עזרה</span>
+            <span class="host-btn-ghost" style="color:#DC2626">עצור משחק</span>
+          </div>
+        </div>
+
+        <!-- Main: question left, controls right -->
+        <div class="host-main">
+
+          <!-- Left: question display -->
+          <div class="host-q-panel">
+            <div class="host-q-label">שאלה 3 מתוך 10 — בחירה מרובה</div>
+            <div class="host-q-text">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+            <div class="host-q-opts">
+              <!-- Option A with bar -->
+              <div class="host-q-opt">
+                <span class="host-q-opt-letter">א.</span>
+                <span style="flex:1;color:#374151;font-size:.8rem;font-weight:500">דוד בן גוריון</span>
+                <div class="host-q-opt-bar"><div class="host-q-opt-bar-fill" style="width:68%"></div></div>
+                <span class="host-q-opt-count">61</span>
+              </div>
+              <div class="host-q-opt">
+                <span class="host-q-opt-letter">ב.</span>
+                <span style="flex:1;color:#374151;font-size:.8rem;font-weight:500">חיים וייצמן</span>
+                <div class="host-q-opt-bar"><div class="host-q-opt-bar-fill" style="width:18%"></div></div>
+                <span class="host-q-opt-count">16</span>
+              </div>
+              <div class="host-q-opt">
+                <span class="host-q-opt-letter">ג.</span>
+                <span style="flex:1;color:#374151;font-size:.8rem;font-weight:500">משה שרת</span>
+                <div class="host-q-opt-bar"><div class="host-q-opt-bar-fill" style="width:10%"></div></div>
+                <span class="host-q-opt-count">9</span>
+              </div>
+              <div class="host-q-opt">
+                <span class="host-q-opt-letter">ד.</span>
+                <span style="flex:1;color:#374151;font-size:.8rem;font-weight:500">לוי אשכול</span>
+                <div class="host-q-opt-bar"><div class="host-q-opt-bar-fill" style="width:4%"></div></div>
+                <span class="host-q-opt-count">1</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: live controls -->
+          <div class="host-ctrl">
+            <div>
+              <div class="host-ctrl-lbl" style="margin-bottom:10px">מצב חי</div>
+              <div class="host-stat-row">
+                <div class="host-stat-pill">
+                  <div class="host-stat-pill-dot"></div>
+                  87 ענו
+                </div>
+                <div class="host-stat-secondary" style="display:flex;align-items:center">מתוך 200</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="host-ctrl-lbl" style="margin-bottom:8px">התפלגות תשובות</div>
+              <div class="host-response-detail">
+                <div class="host-resp-row">
+                  <span class="host-resp-letter">א</span>
+                  <div class="host-resp-bar"><div class="host-resp-fill" style="width:70%"></div></div>
+                  <span class="host-resp-n">61</span>
+                </div>
+                <div class="host-resp-row">
+                  <span class="host-resp-letter">ב</span>
+                  <div class="host-resp-bar"><div class="host-resp-fill" style="width:18%"></div></div>
+                  <span class="host-resp-n">16</span>
+                </div>
+                <div class="host-resp-row">
+                  <span class="host-resp-letter">ג</span>
+                  <div class="host-resp-bar"><div class="host-resp-fill" style="width:10%"></div></div>
+                  <span class="host-resp-n">9</span>
+                </div>
+                <div class="host-resp-row">
+                  <span class="host-resp-letter">ד</span>
+                  <div class="host-resp-bar"><div class="host-resp-fill" style="width:2%"></div></div>
+                  <span class="host-resp-n">1</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="host-ctrl-lbl" style="margin-bottom:8px">טיימר</div>
+              <div class="host-timer-inline">
+                <div class="host-timer-ring-small">8</div>
+                <div class="host-timer-text"><strong>8 שניות</strong> נותרו מתוך 20</div>
+              </div>
+            </div>
+
+            <div style="margin-top:auto">
+              <button class="host-cta">סגור שאלה</button>
+              <div class="host-cta-sub" style="text-align:center">השאלה תיסגר לכל המשתתפים</div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mock coverage note -->
+<div style="max-width:900px;margin:0 auto;padding:20px 0;direction:rtl;">
+  <p style="font-size:.72rem;color:#4E6A8A;text-align:center;line-height:1.7">
+    מוקאפי spine בלבד (ללא קובץ HTML): מסך הצטרפות · חדר המתנה · שאלת טקסט חופשי · גילוי תשובה · לוח ניקוד · בנאי המשחק · לובי המארגן · תוצאות
+  </p>
+</div>

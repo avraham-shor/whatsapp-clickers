@@ -1,0 +1,184 @@
+<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Clickers — במת קהל: שאלה פתוחה</title>
+<style>
+/* ─────────────────────────────────────────────────────────────
+   GOVERNING SPINE SECTIONS — key-stage-question
+   DESIGN.md:
+     • components.split-hero — green-800 top band (30–35% of stage height),
+       flex-column center: progress label (ink-on-dark-muted) → timer-hero →
+       live answer count; white body below; never inverted
+     • components.timer-hero — 220px ring, 8px border rgba(255,255,255,.9),
+       numeral Display 900 96px ink-on-dark; at ≤5s border turns gold #FBBF24
+       AND thickens 8px → 14px (reviewer-gate delta: not hue-only)
+     • components.stage-option — filled green-800, ink-on-dark, letter (א–ד)
+       inline-start bold 700, text 500; min-height 96px, text 40px; radius 8px
+     • Typography — projection ramp (A9 + reviewer-gate revision): timer 96px,
+       question 64px Heading 800, options 40px, progress/live-count labels 40px
+       (raised from 32px — new stage floor is 40px); line-height 1.38 / 1.55
+     • Do's and Don'ts — white ring on dark band (never green-on-green);
+       gold ONLY at ≤5s timer urgency; filled options, letter bold / text regular
+     • Shapes — band bottom edge rounded.md 12px; options rounded.sm 8px
+     • Elevation & Depth — flat: no shadows on stage
+     • Layout & Spacing — 48px safe margin; single column options, 16px between
+   EXPERIENCE.md:
+     • IA → Audience Display — stages: Question row (split-hero: progress +
+       timer-hero + live answer count above; question + stage-options below)
+     • Component Patterns → Audience Display stages: Timer (remaining seconds
+       only, never the total; ≤5s ring turns gold); Live answer count "63 ענו"
+     • State Patterns → Question open row
+     • Key Flows → Flow 1 (UJ-1) step 6 (הטיימר הגדול מתחיל לרדת);
+       Flow 2 (UJ-2) step 5 (הטבעת הופכת זהב בחמש השניות האחרונות);
+       Flow 5 (UJ-5) steps 1–2 (המונה "63 ענו" מטפס; חמש שניות אחרונות — זהב)
+   .decision-log.md: #12 dramatic split (זירת הקרב); #13 filled green options;
+     #14 timer centered in green hero, white ring; A9
+   Scaling: container-query units — 1cqw = 19.2px at the 1920px design width.
+   ───────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#111A27; color:#E4EDF8;
+  font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  padding:48px 24px 80px;
+}
+
+/* ── Page shell (not part of the stage) ── */
+.page-hd{text-align:center;margin-bottom:40px}
+.page-hd h1{font-size:clamp(1.2rem,2.6vw,1.7rem);font-weight:800}
+.page-hd p{color:#7A97BB;font-size:.85rem;margin-top:6px}
+.caption{text-align:center;color:#7A97BB;font-size:.78rem;margin-top:16px;line-height:1.6}
+.section-lbl{
+  font-size:.72rem;font-weight:700;letter-spacing:0; /* Hebrew label — tracking 0 */
+  color:#4E6A8A;margin:64px auto 24px;text-align:center;
+  display:flex;align-items:center;gap:12px;justify-content:center;max-width:1680px;
+}
+.section-lbl::before,.section-lbl::after{content:'';flex:1;height:1px;background:#1E2E42;max-width:140px}
+
+/* ── Scalable 16:9 frame ── */
+.frame-shell{max-width:1680px;margin:0 auto;container-type:inline-size}
+.stage{
+  width:100%; aspect-ratio:16/9; overflow:hidden;
+  border-radius:10px; outline:1px solid rgba(255,255,255,.08);
+  display:flex; flex-direction:column;
+  background:#FFFFFF; /* surface-raised body */
+}
+
+/* ── Split-hero: green band on top — the game's control domain ── */
+.hero{
+  background:#166534; /* green-800 */
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:.5cqw;
+  padding:.8cqw 2.5cqw; /* 48px safe margin inline */
+  border-radius:0 0 .625cqw .625cqw; /* band transition: rounded.md 12px */
+}
+.stage .hero{flex:0 0 35%} /* band = 30–35% of stage height (35% fits 40px labels) */
+
+.hero-prog{
+  font-size:2.0833cqw; /* 40px — raised from 32px, new stage floor */
+  font-weight:600; line-height:1.2;
+  color:rgba(255,255,255,.70); /* ink-on-dark-muted */
+  font-variant-numeric:tabular-nums;
+}
+.hero-ring{
+  width:11.4583cqw; height:11.4583cqw; /* 220px */
+  border-radius:50%;
+  border:.4167cqw solid rgba(255,255,255,.9); /* 8px, white — never green-on-green */
+  display:flex; align-items:center; justify-content:center;
+  font-size:5cqw; /* 96px numeral */
+  font-weight:900; line-height:1; color:#FFFFFF;
+  font-variant-numeric:tabular-nums;
+}
+.hero-count{
+  font-size:2.0833cqw; /* 40px — raised from 32px, new stage floor */
+  font-weight:600; line-height:1.2;
+  color:rgba(255,255,255,.70);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ≤5s urgency — the ONLY gold moment besides the winner:
+   ring turns gold AND thickens 8px → 14px (not hue-only) */
+.hero-gold .hero-ring{border-color:#FBBF24;border-width:.7292cqw} /* 14px */
+
+/* ── White body: the thinking domain ── */
+.q-body{
+  flex:1;
+  display:flex; flex-direction:column; justify-content:center;
+  padding:1.6667cqw 2.5cqw 2.5cqw; /* 48px safe margin */
+  gap:1.6667cqw;
+}
+.q-text{
+  font-size:3.3333cqw; /* 64px question */
+  font-weight:800; line-height:1.38;
+  color:#14532D; /* text-primary */
+  text-align:center; letter-spacing:0;
+}
+.q-opts{display:flex;flex-direction:column;gap:.8333cqw} /* 16px between options */
+.opt{
+  min-height:5cqw; /* 96px */
+  background:#166534; color:#FFFFFF;
+  border-radius:.4167cqw; /* rounded.sm 8px */
+  display:flex; align-items:center; gap:.8333cqw;
+  padding:0 1.25cqw;
+  font-size:2.0833cqw; /* 40px */
+  line-height:1.55;
+}
+.opt-letter{font-weight:700;min-width:2.2cqw} /* letter bold, inline-start */
+.opt-text{font-weight:500}                    /* text regular */
+
+/* ── Alternate-state strip: the hero band alone, at 4 seconds ── */
+.strip{
+  width:100%; aspect-ratio:1920/378; overflow:hidden; /* = 35% band height */
+  border-radius:10px; outline:1px solid rgba(255,255,255,.08);
+}
+.strip .hero{height:100%}
+</style>
+</head>
+<body>
+
+<div class="page-hd">
+  <h1>WhatsApp Clickers — במת קהל: שאלה פתוחה</h1>
+  <p>מסך מקרן 16:9 · עוצב ב-1920×1080 · ירוק חגיגה · כיוון ג — זירת הקרב</p>
+</div>
+
+<!-- Main frame — 12 seconds remaining, white ring -->
+<div class="frame-shell">
+  <div class="stage">
+    <div class="hero">
+      <div class="hero-prog">שאלה 3 מתוך 10</div>
+      <div class="hero-ring">12</div>
+      <div class="hero-count" aria-live="polite">63 ענו</div>
+    </div>
+    <div class="q-body">
+      <div class="q-text">מי היה ראש הממשלה הראשון של ישראל?</div>
+      <div class="q-opts">
+        <div class="opt"><span class="opt-letter">א.</span><span class="opt-text">דוד בן גוריון</span></div>
+        <div class="opt"><span class="opt-letter">ב.</span><span class="opt-text">משה שרת</span></div>
+        <div class="opt"><span class="opt-letter">ג.</span><span class="opt-text">חיים ויצמן</span></div>
+        <div class="opt"><span class="opt-letter">ד.</span><span class="opt-text">לוי אשכול</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="caption">שאלה פתוחה — 12 שניות: טבעת לבנה על הפס הירוק, מונה "63 ענו" חי, אפשרויות ירוק מלא עם אות מודגשת.</p>
+
+<!-- Load-bearing alternate state: ≤5s urgency -->
+<div class="section-lbl">מצב חלופי נושא-משקל — 5 שניות אחרונות: הטבעת הופכת זהב</div>
+
+<div class="frame-shell">
+  <div class="strip">
+    <div class="hero hero-gold">
+      <div class="hero-prog">שאלה 3 מתוך 10</div>
+      <div class="hero-ring">4</div>
+      <div class="hero-count" aria-live="polite">71 ענו</div>
+    </div>
+  </div>
+</div>
+
+<p class="caption">אותו פס hero ב-4 שניות — הטבעת זהב #FBBF24 ומתעבה ל-14px (לא גוון בלבד). רגע הזהב היחיד מלבד מסך הזוכה; החדר סופר בקול.</p>
+
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Clickers — במת קהל: הכרזת הזוכה</title>
+<style>
+/* ─────────────────────────────────────────────────────────────
+   GOVERNING SPINE SECTIONS — key-stage-winner
+   DESIGN.md:
+     • components.winner-card — full-screen stage takeover, green-800 bg;
+       winner name gold Display 900 projection-large; score ink-on-dark-muted;
+       tagline ink-on-dark-muted small; CSS confetti (geometric, no images)
+     • Brand & Style — gold appears in exactly two moments; this is the second.
+       Filter-safe: geometric shapes only, no photos/illustrations of people
+     • Components — winner-card: geometric circles and rectangles falling in
+       gold and green-600; no confetti images, no GIFs, no external assets
+     • Typography — Display 900 for the winner's name; nothing below 40px
+       (reviewer-gate floor — verified: tagline 40px, score 48px, name ~125px;
+       no token changes on this screen)
+     • Elevation & Depth — flat: no shadows, no text-shadow on stage
+   EXPERIENCE.md:
+     • IA → Audience Display — stages: Winner takeover row (winner-card:
+       winner name, score, geometric celebration)
+     • Component Patterns → Audience Display stages: Winner takeover
+       (full-screen winner-card; geometric confetti; static celebratory
+       frame under reduced-motion)
+     • State Patterns → Game over row (Audience Display: winner takeover)
+     • Voice and Tone — the מזל טוב discipline: appears only at the winner
+       moment, the verbal equivalent of gold
+     • Key Flows → Flow 2 (UJ-2) step 7: המקרן מתפוצץ בקונפטי גיאומטרי —
+       "מזל טוב, משה כהן! 1,240 נקודות"
+   .decision-log.md: #11 Festival Green; #5 filter-safe; A9
+   Confetti colors: gold #FBBF24 + green-600 #16A34A only. Pieces sit at
+   scattered static positions; the animation drifts them through the frame
+   (negative delays), so the screen also reads as a static frame and stays
+   scattered under prefers-reduced-motion.
+   Scaling: container-query units — 1cqw = 19.2px at the 1920px design width.
+   ───────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#111A27; color:#E4EDF8;
+  font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  padding:48px 24px 80px;
+}
+
+/* ── Page shell (not part of the stage) ── */
+.page-hd{text-align:center;margin-bottom:40px}
+.page-hd h1{font-size:clamp(1.2rem,2.6vw,1.7rem);font-weight:800}
+.page-hd p{color:#7A97BB;font-size:.85rem;margin-top:6px}
+.caption{text-align:center;color:#7A97BB;font-size:.78rem;margin-top:16px;line-height:1.6}
+
+/* ── Scalable 16:9 frame ── */
+.frame-shell{max-width:1680px;margin:0 auto;container-type:inline-size}
+.stage{
+  width:100%; aspect-ratio:16/9; overflow:hidden;
+  border-radius:10px; outline:1px solid rgba(255,255,255,.08);
+}
+
+/* ── Winner takeover — full green-800 ── */
+.winner{
+  background:#166534;
+  position:relative;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:2.5cqw; /* 48px safe margin */
+  text-align:center;
+}
+
+.w-content{position:relative;z-index:1}
+
+/* Tagline — ink-on-dark-muted, small (32–40px band) */
+.w-tagline{
+  font-size:2.0833cqw; font-weight:600; line-height:1.38;
+  color:rgba(255,255,255,.70);
+}
+
+/* Winner name — gold, Display 900, projection-large */
+.w-name{
+  font-size:6.5cqw; /* ~125px */
+  font-weight:900; line-height:1.1;
+  color:#FBBF24; letter-spacing:0;
+  margin-top:1.25cqw;
+}
+
+/* Score — ink-on-dark-muted, tabular-nums */
+.w-score{
+  font-size:2.5cqw; /* 48px */
+  font-weight:600; line-height:1.38;
+  color:rgba(255,255,255,.70);
+  font-variant-numeric:tabular-nums;
+  margin-top:1.25cqw;
+}
+
+/* ── Geometric confetti — gold + green-600 only, pure CSS ── */
+.confetti{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.cf{position:absolute;animation:drift linear infinite}
+.cf-gold{background:#FBBF24}
+.cf-green{background:#16A34A}
+.cf-circle{border-radius:50%}
+.cf-sm{width:.7cqw;height:.7cqw}
+.cf-md{width:.9cqw;height:.9cqw}
+.cf-lg{width:1.05cqw;height:1.05cqw}
+.cf-bar{width:.55cqw;height:1.25cqw;border-radius:.15cqw}
+.cf-sq{width:.8cqw;height:.8cqw;border-radius:.15cqw}
+
+@keyframes drift{
+  from{transform:translateY(-60cqw) rotate(0deg)}
+  to{transform:translateY(60cqw) rotate(300deg)}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .cf{animation:none} /* static celebratory frame — pieces hold their scatter */
+}
+</style>
+</head>
+<body>
+
+<div class="page-hd">
+  <h1>WhatsApp Clickers — במת קהל: הכרזת הזוכה</h1>
+  <p>מסך מקרן 16:9 · עוצב ב-1920×1080 · ירוק חגיגה · רגע הזהב השני</p>
+</div>
+
+<div class="frame-shell">
+  <div class="stage winner">
+
+    <div class="confetti" aria-hidden="true">
+      <div class="cf cf-gold cf-circle cf-md"  style="left:4%;top:18%;animation-duration:11s;animation-delay:-5s"></div>
+      <div class="cf cf-green cf-bar"          style="left:9%;top:62%;animation-duration:13s;animation-delay:-7s"></div>
+      <div class="cf cf-gold cf-bar"           style="left:14%;top:35%;animation-duration:10s;animation-delay:-4.5s"></div>
+      <div class="cf cf-green cf-circle cf-sm" style="left:19%;top:78%;animation-duration:12s;animation-delay:-6.5s"></div>
+      <div class="cf cf-gold cf-sq"            style="left:24%;top:12%;animation-duration:14s;animation-delay:-6s"></div>
+      <div class="cf cf-green cf-bar"          style="left:29%;top:55%;animation-duration:11s;animation-delay:-5.8s"></div>
+      <div class="cf cf-gold cf-circle cf-lg"  style="left:34%;top:30%;animation-duration:12.5s;animation-delay:-5.5s"></div>
+      <div class="cf cf-green cf-sq"           style="left:39%;top:70%;animation-duration:10.5s;animation-delay:-5s"></div>
+      <div class="cf cf-gold cf-bar"           style="left:44%;top:20%;animation-duration:13.5s;animation-delay:-7.2s"></div>
+      <div class="cf cf-gold cf-circle cf-md"  style="left:49%;top:84%;animation-duration:11.5s;animation-delay:-5.2s"></div>
+      <div class="cf cf-green cf-circle cf-md" style="left:54%;top:45%;animation-duration:12s;animation-delay:-6.8s"></div>
+      <div class="cf cf-gold cf-bar"           style="left:59%;top:15%;animation-duration:10s;animation-delay:-4.2s"></div>
+      <div class="cf cf-green cf-bar"          style="left:64%;top:66%;animation-duration:13s;animation-delay:-6s"></div>
+      <div class="cf cf-gold cf-circle cf-md"  style="left:69%;top:38%;animation-duration:11s;animation-delay:-6.2s"></div>
+      <div class="cf cf-gold cf-sq"            style="left:74%;top:80%;animation-duration:12.5s;animation-delay:-5.9s"></div>
+      <div class="cf cf-green cf-circle cf-sm" style="left:79%;top:25%;animation-duration:10.5s;animation-delay:-4.8s"></div>
+      <div class="cf cf-gold cf-bar"           style="left:84%;top:58%;animation-duration:13.5s;animation-delay:-6.4s"></div>
+      <div class="cf cf-green cf-bar"          style="left:89%;top:42%;animation-duration:11.5s;animation-delay:-6.1s"></div>
+      <div class="cf cf-gold cf-circle cf-md"  style="left:94%;top:72%;animation-duration:12s;animation-delay:-5.4s"></div>
+      <div class="cf cf-gold cf-bar"           style="left:7%;top:88%;animation-duration:14s;animation-delay:-7.5s"></div>
+      <div class="cf cf-green cf-circle cf-sm" style="left:51%;top:8%;animation-duration:11s;animation-delay:-5.6s"></div>
+      <div class="cf cf-gold cf-circle cf-sm"  style="left:91%;top:10%;animation-duration:13s;animation-delay:-6.6s"></div>
+    </div>
+
+    <div class="w-content">
+      <div class="w-tagline">מזל טוב!</div>
+      <div class="w-name">משה כהן</div>
+      <div class="w-score">1,240 נקודות</div>
+    </div>
+
+  </div>
+</div>
+
+<p class="caption">השתלטות הזוכה — שם בזהב Display 900, ניקוד מעומעם-על-כהה, קונפטי גיאומטרי טהור-CSS בזהב וירוק-600 בלבד. מסגרת חגיגית סטטית תחת reduced-motion.</p>
+
+</body>
+</html>

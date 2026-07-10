@@ -1,0 +1,121 @@
+<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Clickers — במת קהל: לובי</title>
+<style>
+/* ─────────────────────────────────────────────────────────────
+   GOVERNING SPINE SECTIONS — key-stage-lobby
+   DESIGN.md:
+     • components.stage-lobby — JOIN code Display 900 (120px+ at 1080p),
+       instruction line Heading 800 ("שלחו JOIN [קוד] למספר [מספר]"),
+       counter as oversized pill: green-50 bg, green-800 numeral, tabular-nums
+     • REVIEWER-GATE DELTA — phone number promoted to the same Display-900
+       scale treatment as the JOIN code (digit-grouped 050-123-4567,
+       tabular-nums): transcribing it is the product's hardest visual task.
+       LTR tokens inside RTL text are wrapped in <bdi> (now mandated).
+       Counter pill numeral ≥48px. New stage floor: nothing below 40px.
+     • Typography — Display 900 / Heading 800 / UI 600; projection ramp
+       (A9 revised): nothing below 40px; letter-spacing 0 on Hebrew,
+       +0.08em on uppercase Latin
+     • Colors — Festival Green; ink-on-dark on green-800; NO gold (not a gold moment)
+     • Layout & Spacing — 16:9 at 1920×1080, full-bleed, 48px safe margin
+     • Elevation & Depth — flat: no shadows on any stage element
+   EXPERIENCE.md:
+     • IA → Audience Display — stages: Lobby row (JOIN instructions + climbing counter)
+     • State Patterns → Lobby row (stage-lobby: JOIN instructions + climbing counter)
+     • Voice and Tone — plural imperative (שלחו); JOIN keyword = the single Latin exception
+     • Key Flows → Flow 1 (UJ-1) step 3: "שלחו JOIN COHEN24 למספר 050-XXXXXXX",
+       counter climbing 4… 23… 57
+     • Accessibility Floor — dir="rtl" lang="he"; aria-live="polite" on the counter
+   .decision-log.md: #11 Festival Green; A9 (1080p ramp)
+   Scaling: container-query units — 1cqw = 19.2px at the 1920px design width,
+   so the whole ramp scales with the frame (equivalent of the rem-based ramp).
+   ───────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#111A27; color:#E4EDF8;
+  font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  padding:48px 24px 80px;
+}
+
+/* ── Page shell (not part of the stage) ── */
+.page-hd{text-align:center;margin-bottom:40px}
+.page-hd h1{font-size:clamp(1.2rem,2.6vw,1.7rem);font-weight:800}
+.page-hd p{color:#7A97BB;font-size:.85rem;margin-top:6px}
+.caption{text-align:center;color:#7A97BB;font-size:.78rem;margin-top:16px;line-height:1.6}
+
+/* ── Scalable 16:9 frame ── */
+.frame-shell{max-width:1680px;margin:0 auto;container-type:inline-size}
+.stage{
+  width:100%; aspect-ratio:16/9; overflow:hidden;
+  border-radius:10px; outline:1px solid rgba(255,255,255,.08);
+}
+
+/* ── Lobby stage — festival green environment ── */
+.lobby{
+  background:#166534; /* green-800 */
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:2.5cqw; /* 48px safe margin */
+  text-align:center;
+}
+
+/* Instruction line — Heading 800, 64px, ink-on-dark */
+.lobby-instruction{
+  font-size:3.3333cqw; font-weight:800; line-height:1.38;
+  color:#FFFFFF; letter-spacing:0;
+}
+
+/* JOIN code — Display 900, ~173px (spec: 120px+), uppercase Latin gets +0.08em */
+.lobby-code{
+  font-size:9cqw; font-weight:900; line-height:1.1;
+  color:#FFFFFF; letter-spacing:.08em;
+  margin-top:2cqw;
+  font-variant-numeric:tabular-nums;
+}
+
+/* Phone number — same Display-900 scale as the code (reviewer-gate delta),
+   digit-grouped, tabular-nums; digits carry no uppercase tracking */
+.lobby-number{
+  font-size:9cqw; font-weight:900; line-height:1.1;
+  color:#FFFFFF; letter-spacing:0;
+  margin-top:.6cqw;
+  font-variant-numeric:tabular-nums;
+}
+
+/* Participant counter — oversized pill: green-50 bg, green-800 numeral ≥48px */
+.lobby-pill{
+  margin-top:2.5cqw;
+  background:#F0FDF4; /* green-50 */
+  color:#166534;      /* green-800 */
+  border-radius:9999px;
+  padding:1cqw 2.5cqw;
+  font-size:2.5cqw; /* 48px — above the 40px stage floor */
+  font-weight:600; line-height:1.38;
+  font-variant-numeric:tabular-nums;
+}
+.lobby-pill .num{font-weight:800;font-size:3.125cqw} /* 60px numeral (≥48px) */
+</style>
+</head>
+<body>
+
+<div class="page-hd">
+  <h1>WhatsApp Clickers — במת קהל: לובי</h1>
+  <p>מסך מקרן 16:9 · עוצב ב-1920×1080 · ירוק חגיגה · כיוון ג — זירת הקרב</p>
+</div>
+
+<div class="frame-shell">
+  <div class="stage lobby">
+    <div class="lobby-instruction">שלחו <bdi dir="ltr">JOIN COHEN24</bdi> למספר <bdi dir="ltr">050-123-4567</bdi></div>
+    <div class="lobby-code"><bdi dir="ltr">COHEN24</bdi></div>
+    <div class="lobby-number"><bdi dir="ltr">050-123-4567</bdi></div>
+    <div class="lobby-pill" aria-live="polite"><span class="num">57</span> הצטרפו</div>
+  </div>
+</div>
+
+<p class="caption">לובי — הוראת הצטרפות (Heading 800), קוד JOIN ומספר הטלפון בענק (Display 900, מספר מקובץ-ספרות), מונה משתתפים מטפס. אין זהב — זה לא רגע שיא.</p>
+
+</body>
+</html>

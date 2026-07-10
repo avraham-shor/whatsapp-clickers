@@ -1,0 +1,26 @@
+# Go build output
+server/bin/
+*.exe
+
+# Node
+node_modules/
+
+# Frontend build output (real builds are never committed; the placeholder
+# in server/internal/webdist/dist/ IS committed — see un-ignore below)
+web/dist/
+server/internal/webdist/dist/*
+!server/internal/webdist/dist/index.html
+
+# Environment files (secrets)
+.env
+.env.local
+
+# Editor junk
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# NOTE: _bmad/, _bmad-output/, docs/ are intentionally tracked — planning
+# artifacts stay in the repo.

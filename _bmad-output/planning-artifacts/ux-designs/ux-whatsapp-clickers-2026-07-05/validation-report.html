@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX Design Validation: WhatsApp Clickers</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>WhatsApp Clickers — UX Design Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/ux-designs/ux-whatsapp-clickers-2026-07-05/ (OQ-7 revision, 2026-07-09)</div>
+      </div>
+    </header>
+
+    <div class="synthesis">
+      <p>A strong, source-extractable spine pair: all five PRD journeys are re-narrated as Key Flows with climaxes, every <code>{token}</code> reference in both files resolves, the conversation grammar (state × message-class) is genuinely contract-grade, and the two-palette / gold-discipline system is coherent end to end. One high-severity gap blocks clean downstream extraction — the Audience Display has no defined content for Free-Text Questions (question stage and reveal stage), which epics Stories 4.3/4.4 explicitly wait on. Beyond that, the issues are a cluster of copy-contract self-inconsistencies (emoji rule vs. templates, an unimplementable placeholder) and cross-document ripples (20s vs. 30s default, UX-DR15 supersession) that are cheap to fix but would confuse an AI story-dev if left standing.</p>
+      <p>The accessibility lens materially sharpens the picture: a token collision (<code>success</code> == <code>green-600</code>, both <code>#16A34A</code>) silently voids the distribution-bar's claimed correct-answer distinction, and puts the game's most important moment — the Reveal — at the stage's weakest text contrast (3.3:1 before projector washout). The projection type ramp is specified in device pixels with no viewing-geometry basis, the lobby undersizes the hardest visual task in the product (transcribing the phone number), and the host keyboard shortcuts as specified can end a game by accident. None of this blocks Finalize; the six combined highs are all resolvable in-spine with token-level and copy-level fixes.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card"><div class="dim-name">Flow coverage</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Token completeness</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Component coverage</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">State coverage</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Visual reference coverage</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Bloat &amp; overspecification</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Inheritance discipline</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Shape fit</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>1. Flow coverage</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>All five PRD journeys (UJ-1–UJ-5) have Key Flows with named protagonists, numbered steps, explicit climax beats (<strong>שיא</strong>), and failure/edge paths where applicable. Flow 5's protagonist is "the room" — correct for a shared-screen journey.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">"Names mirrored verbatim" claim vs. Hebrew-translated UJ titles</h3><span class="finding-location">EXPERIENCE.md · Key Flows intro</span></header>
+            <div class="finding-note">UJ-N identifiers match 1:1 so extraction is safe, but titles are translations.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Soften to "UJ numbers authoritative; titles rendered in Hebrew."</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Flow 2 has no failure path of its own</h3><span class="finding-location">EXPERIENCE.md · Flow 2</span></header>
+            <div class="finding-note">Wrong-answer and late-answer branches live in Flows 3 and 5. Acceptable for the emotional-climax journey.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Optional one-line pointer to where its failure branches are narrated.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>2. Token completeness</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>All 53 frontmatter tokens extracted; every <code>{path.to.token}</code> reference in both files resolves, including all eight <code>{components.*}</code> references from EXPERIENCE.md. No missing hex. The stated 7.1:1 contrast claim verified correct (7.14:1).</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Typography keys non-spec (family/weight vs. fontFamily/fontWeight)</h3><span class="finding-location">DESIGN.md · frontmatter typography:</span></header>
+            <div class="finding-note">A spec-conformant token resolver will find empty typography objects.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Rename keys to fontFamily/fontWeight; keep note.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Component tokens are prose sentences, not token objects</h3><span class="finding-location">DESIGN.md · frontmatter components:</span></header>
+            <div class="finding-note">Content complete and readable, but the machine contract is degraded — a resolver cannot flatten them.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Restructure each component as an object (background, foreground, radius, minHeight, …); move narrative to the Components body section.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Contrast targets effectively absent from DESIGN.md</h3><span class="finding-location">DESIGN.md · Colors</span></header>
+            <div class="finding-note">EXPERIENCE.md defers to DESIGN.md for ratios but DESIGN.md states none. Unstated load-bearing combos: gold/green-800 ≈ 4.3:1 (AA large only), ink-on-dark-muted/green-800 ≈ 4.4:1.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a short contrast table to DESIGN.md Colors with AA thresholds per combination.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">ink-on-dark-muted uses rgba, violating the hex-string rule</h3><span class="finding-location">DESIGN.md · frontmatter colors:</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> 8-digit hex '#FFFFFFB3'.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Orphan tokens (green-100, border-mid, text-disabled, host-surface-raised); duplicate values (green-100=border-light, surface-base=green-50)</h3><span class="finding-location">DESIGN.md · frontmatter colors:</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Delete unused tokens or state where they apply; mark intentional aliases.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">rounded.pill vs. conventional "full"</h3><span class="finding-location">DESIGN.md · frontmatter rounded:</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Optional rename; internally consistent as-is.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>3. Component coverage</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>13 components extracted; every component referenced in EXPERIENCE.md has a matching DESIGN.md spec with identical names, and the behavioral rules are real rules — not one-word descriptions.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">shadcn-inheritance contract absent from DESIGN.md</h3><span class="finding-location">DESIGN.md · Components</span></header>
+            <div class="finding-note">A consumer reading DESIGN.md alone cannot tell whether builder inputs, dialogs, tables, toasts are unspecified or inherited.</div>
+            <div class="finding-fix"><strong>Fix:</strong> One paragraph: host dashboard inherits shadcn/ui defaults; this file specifies only the deltas.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">host-stat-pill / host-primary-action never referenced by name in EXPERIENCE.md</h3><span class="finding-location">EXPERIENCE.md · Host control panel</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Add {components.*} references at the relevant rows.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Question Bank package cards / "מהמאגר" badge in neither visual contract</h3><span class="finding-location">EXPERIENCE.md · Game builder &amp; Question Bank</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Minimal component entry or explicit shadcn-defaults assignment.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>4. State coverage</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>The state × surface matrix is a strong invention; conversation grammar guarantees no-silence across every message class; reduced-motion and reconnect covered. Carries the review's one rubric-high.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Audience Display has no defined content for Free-Text Questions</h3><span class="finding-location">EXPERIENCE.md · IA + Component Patterns; DESIGN.md · components</span></header>
+            <div class="finding-note">Neither the question stage (what replaces the option rows) nor the reveal stage (what replaces the distribution bars) is specified. epics.md Stories 4.3/4.4 explicitly wait on this; blocks Epic 4 story extraction for FT questions.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Define FT question-stage body and FT reveal content (correct-answer card + answered/correct counts), plus a DESIGN.md component entry.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Pre-lobby JOIN (game in draft) unhandled in the grammar</h3><span class="finding-location">EXPERIENCE.md · conversation grammar</span></header>
+            <div class="finding-note">Organizers share codes in advance; early JOIN resolves to neither "valid during lobby" nor "invalid code."</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a pre-lobby column with a defined reply.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Winner-tie presentation undefined</h3><span class="finding-location">EXPERIENCE.md · winner takeover + templates; DESIGN.md · winner-card</span></header>
+            <div class="finding-note">epics Stories 3.9/4.6 assume "all tied names included as winners" with no UX to render it.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Specify the tie variant for winner-card and tie wording for the messages.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Grammar column doesn't explicitly include the leaderboard state</h3><span class="finding-location">EXPERIENCE.md · grammar table</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Rename column "Between questions (closed / revealed / leaderboard)."</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">שם: from an unregistered sender returns "Name updated"</h3><span class="finding-location">EXPERIENCE.md · grammar table</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Footnote: unregistered שם: → Help.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Host sign-in error states / cold-load unspecified</h3><span class="finding-location">EXPERIENCE.md · Host Dashboard IA</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Optional State Patterns row; acceptable for a pilot desktop tool.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>5. Visual reference coverage</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>The pre-pivot mockup is referenced inline with a supersede note and spine-wins-on-conflict stated once — the correct pattern. Four new stage mocks rendered in parallel with this review.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Winner screen in key-screens-1.html neither declared superseded nor indicative</h3><span class="finding-location">EXPERIENCE.md · IA mockup note</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Extend the note: identity indicative, phone-scale layout superseded.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Exploration artifacts (color-themes-1, directions-1) are orphans; stale .working duplicate of key-screens-1</h3><span class="finding-location">.working/</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Optional provenance line in DESIGN.md; delete the stale duplicate.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>6. Bloat &amp; overspecification</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>Editorial voice only where allowed; no source restatement; pixel values only inside provenance markers; EXPERIENCE.md table-driven throughout.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Three overlapping message tables (IA inventory / grammar / templates)</h3><span class="finding-location">EXPERIENCE.md</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Accept; add a one-line sync note naming the templates table canonical.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Meta-annotation embedded in canonical copy string (Result-correct "⟵ רק אם זכית בו")</h3><span class="finding-location">EXPERIENCE.md · templates</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Move conditionality out of the copy cell.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>7. Inheritance discipline</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>All five source paths resolve; glossary terms verbatim and consistent; component names identical everywhere; architecture handshakes mirrored. The spine correctly resolves the PRD's illustrative copy that violates A2 into gender-neutral variants.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">A1 emoji rule contradicted by the spine's own Result-correct template (🎉+⚡)</h3><span class="finding-location">EXPERIENCE.md · Voice and Tone vs. templates</span></header>
+            <div class="finding-note">Result-correct is not one of the two stated exceptions; the copy contract self-contradicts in the file that is the copy source.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add speed-bonus results to the exception list (mirror in DESIGN.md + A1) or drop ⚡.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Invalid-code template contains an unimplementable placeholder ([קוד נכון])</h3><span class="finding-location">EXPERIENCE.md · templates</span></header>
+            <div class="finding-note">The system cannot know the correct code.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Generic form: "בדקו את הקוד עם המארגן ושלחו שוב: JOIN ואחריו הקוד."</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Default time limit conflicts: spine A8 = 20s vs. epics Story 1.3 = 30s</h3><span class="finding-location">EXPERIENCE.md · Game builder; epics.md · Story 1.3</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Ripple epics Story 1.3 → 20s, citing A8.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">epics UX-DR15 still binds the superseded "direct, short / ברוך הבא" tone</h3><span class="finding-location">epics.md · UX-DR15</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> One-line ripple: warm-playful per UX revision 2026-07-09; example copy superseded by EXPERIENCE.md templates.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Placeholder legend incomplete ([שם], [ניקוד], [בונוס], [דירוג], [תשובה נכונה], [קוד] undeclared)</h3><span class="finding-location">EXPERIENCE.md · templates intro</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Extend the legend.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">A5's last-question Result-wrong variant never spelled out</h3><span class="finding-location">EXPERIENCE.md · templates</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Show both variants.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Casing drift: "JOIN code"/"JOIN Code"; "Host dashboard"/"Host Dashboard"</h3><span class="finding-location">both spines</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Normalize to Glossary casing.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>8. Shape fit</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>DESIGN.md sections all present in canonical order; EXPERIENCE.md required defaults all present, plus Inspiration &amp; Anti-patterns and Responsive &amp; Platform, both earning their place. Invented sections (grammar, templates, state matrix, revision banner) all earn theirs.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Missing optional description frontmatter field</h3><span class="finding-location">DESIGN.md · frontmatter</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> One line.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Both spines still status: draft at the Finalize gate</h3><span class="finding-location">both frontmatters</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Flip to final when findings are dispositioned.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">[NOTE FOR UX] on keyboard shortcuts is a genuinely open item</h3><span class="finding-location">EXPERIENCE.md · Interaction Primitives</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Track to closure before Epic 3 Story 3.1 (the accessibility review below supplies the confirmation).</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary><h2>Accessibility review</h2><span class="reviewer-source">review-accessibility.md</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>The accessibility floor is unusually deliberate for a planning-stage spine — the headline 7.1:1 claim is mathematically correct, color is never the sole reveal signal, reduced-motion is enumerated per animation, and non-answerer silence is genuinely humane design. However, a token collision silently voids the claimed distribution-bar distinction; the Reveal — the game's most important moment — carries the weakest text contrast on the stage; and the projection type ramp's "sufficient at 5–15m" premise is unverifiable and likely false in typical family-event rooms. All contrast ratios recomputed independently. 0 critical / 5 high / 7 medium / 5 low.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Token collision: success == green-600 (#16A34A) — the correct distribution bar cannot render as distinct</h3><span class="finding-location">DESIGN.md · frontmatter colors</span></header>
+            <div class="finding-note">Zero visual difference between the correct bar and every other bar, for all viewers; also falsifies "semantic colors are separate from brand green."</div>
+            <div class="finding-fix"><strong>Fix:</strong> Re-point success to #15803D (white = 5.0:1) and mark the correct bar with ✓ in its label — two greens are never distinguishable for deutan/protan viewers at distance.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Reveal is the lowest-contrast moment on the stage (white on success = 3.30:1)</h3><span class="finding-location">DESIGN.md · stage-option-correct</span></header>
+            <div class="finding-note">Passes AA only via the large-text allowance; projector washout pushes the game's most important information below effective legibility. Hierarchy inverted vs. 7.13:1 on un-revealed options.</div>
+            <div class="finding-fix"><strong>Fix:</strong> The same success → #15803D token change resolves both findings.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Type ramp has no viewing-geometry basis; display-only surfaces go illegible past ~6–7m</h3><span class="finding-location">DESIGN.md · Typography (A9)</span></header>
+            <div class="finding-note">Question text is mitigated (private copy in WhatsApp) but leaderboard, distribution bars, counters exist only on the display — and 40px names are what the back row most wants to read (UJ-5, SM-5).</div>
+            <div class="finding-fix"><strong>Fix:</strong> State the viewing assumption; raise display-only surfaces one step (leaderboard/distribution labels 48px, stage floor 40px); add back-row preflight guidance.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Lobby undersizes the phone number — the hardest visual task in the product — and bidi isolation is unmandated</h3><span class="finding-location">DESIGN.md · stage-lobby; EXPERIENCE.md · Flow 1</span></header>
+            <div class="finding-note">Every participant must transcribe 10 digits from the projector (kosher phones: no wa.me links); mixed RTL/LTR content can visually reorder without bidi isolation.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Phone number at Display scale, grouped, tabular-nums; spine rule for bidi isolation on web + messages_he.go; Organizer guidance to pre-share the number as a contact card.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Host keyboard shortcuts will misfire at live-event stakes</h3><span class="finding-location">EXPERIENCE.md · Interaction Primitives</span></header>
+            <div class="finding-note">Global Space races native focused-button activation (failure mode: ending the game in front of 80 people); Escape-opens-dialog inverts its universal meaning.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Space fires primary CTA only with focus on body/main; native behavior wins on focused buttons; dedicated visible "עצור" control; Escape only closes; destructive advances always behind the confirm dialog.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Digits 1–4 accepted but never advertised</h3><span class="finding-location">EXPERIENCE.md · templates</span></header>
+            <div class="finding-note">Digits are the easier motor path for tremor, low literacy, children, and screen-reader users — exactly SM-5's populations.</div>
+            <div class="finding-fix"><strong>Fix:</strong> "השיבו באות (א–ד) או בספרה (1–4)" in the question template and format hint.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Nothing tells Participants to stay in the chat</h3><span class="finding-location">EXPERIENCE.md · Welcome template</span></header>
+            <div class="finding-note">Locking the phone or drifting to another chat costs 5–10s per question against a 20s window; the failure is invisible (non-answerers get silence).</div>
+            <div class="finding-fix"><strong>Fix:</strong> One clause in Welcome: "השאירו את הצ'אט הזה פתוח — השאלות יגיעו לכאן."</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Dimmed wrong options fall to ~2.1:1 — unreadable exactly when the room re-reads them</h3><span class="finding-location">DESIGN.md · stage-option-dimmed</span></header>
+            <div class="finding-note">The distribution bars invite "רוב החדר אמר ג!" — meaningless if nobody can still read what ג said.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Dim the fill, not the text — e.g., green-100 background with text-primary text; the ✓ and success fill already carry the distinction.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">timer-inline fails non-text contrast (gold on white ≈ 1.6:1) and breaks the two-moment gold rule</h3><span class="finding-location">DESIGN.md · timer-inline</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Ring in green-800; at ≤5s switch to error red (urgent on the tool surface); add rule: gold only ever on green-800/green-900 surfaces.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Live regions as specified will flood screen readers</h3><span class="finding-location">EXPERIENCE.md · Accessibility Floor</span></header>
+            <div class="finding-note">The answer counter updates ~80 times in 20s; the timer numeral's live-region status is unspecified.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Throttle counter announcements (every 5s / milestones); exclude the timer numeral from live regions; assertive for stage transitions only.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">200%-zoom claim contradicts the 1024px responsive floor</h3><span class="finding-location">EXPERIENCE.md · Accessibility Floor vs. Responsive &amp; Platform</span></header>
+            <div class="finding-note">200% zoom on a 1280px laptop = 640px effective viewport — territory the spine disowns.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Promote the single-column collapse to a supported, tested mode for builder and live control.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Blind participants have no time-remaining channel</h3><span class="finding-location">EXPERIENCE.md · templates + Anti-patterns</span></header>
+            <div class="finding-note">The limit is stated once, at the end of the message; the only countdown is visual; SR round-trip barely fits 20s.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Builder guidance (30–45s accommodates SR/slower-motor); name the room's audible last-five count as designed behavior.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Focus orphaned on host CTA swaps</h3><span class="finding-location">EXPERIENCE.md · Host control panel</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> One persistent primary button, label/action swap in place, polite state announcement.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Distribution-bar label placement ambiguous (2.27:1 if overlaid on the fill)</h3><span class="finding-location">DESIGN.md · distribution-bar</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Labels always outside the fill, on white.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Reduced-motion for the room gated on the Organizer's OS preference</h3><span class="finding-location">EXPERIENCE.md · Accessibility Floor</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> "הפחת אנימציות" toggle in the dashboard's display controls.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">≤5s urgency cue is hue-only on a thin ring</h3><span class="finding-location">DESIGN.md · timer-hero</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Thicken the ring (8px → 14px) at ≤5s alongside the gold shift.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Leaderboard reshuffle not in the reduced-motion list; ▲ mover has no size spec</h3><span class="finding-location">EXPERIENCE.md · stages; DESIGN.md · leaderboard-row-mover</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> Name the reshuffle explicitly; ▲ obeys the stage type floor.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Welcome rename hint stacks colons ("שלחו: שם:")</h3><span class="finding-location">EXPERIENCE.md · Welcome template</span></header>
+            <div class="finding-fix"><strong>Fix:</strong> "(לא [שם]? שלחו לדוגמה — שם: רחל לוי)".</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li>All cross-references resolve: every {colors.*}, {rounded.*}, {components.*} maps to a defined token; all five sources: paths exist on disk; the mockup path exists.</li>
+        <li>Contrast math verified independently by both reviewers: white/green-800 = 7.14:1 (claim correct); gold/green-800 ≈ 4.3:1; ink-on-dark-muted/green-800 ≈ 4.4:1; white/success(#16A34A) = 3.30:1.</li>
+        <li>Name inconsistencies: "JOIN code" vs. "JOIN Code"; "Host dashboard" vs. "Host Dashboard"; UJ titles translated while claimed "verbatim" (UJ-N ids match).</li>
+        <li>Frontmatter: DESIGN.md missing optional description; typography keys non-spec; ink-on-dark-muted rgba not hex; components values prose-typed. EXPERIENCE.md frontmatter complete.</li>
+        <li>Cross-document ripples for correct-course: epics Story 1.3 default 30s → 20s (A8); epics UX-DR15 tone/example copy superseded; epics UX-DR5 timer-inline gold ring superseded by the accessibility fix; epics Stories 3.9/4.6 winner-tie assumption needs the UX answer.</li>
+        <li>EXPERIENCE.md is English throughout except the Key Flows (Hebrew) — deliberate; the PRD's English UJ text is the fallback for non-Hebrew readers.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: review-rubric.md · Accessibility: review-accessibility.md</span>
+        <span>Generated: 2026-07-09</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,322 @@
+<title>WhatsApp Clickers — כיוונים עיצוביים</title>
+<style>
+/* ── Tokens ── */
+:root {
+  --bg: #C2CEDA;
+  --card: #FFFFFF;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.07), 0 4px 14px rgba(0,0,0,.08);
+  --shadow-phone: 0 6px 24px rgba(0,0,0,.22), 0 1px 6px rgba(0,0,0,.14);
+  --t1: #12213A; --t2: #4A5C74; --t3: #8695AC;
+  --div: #D4DCE8;
+  --tag-bg: #E4EBF4; --tag-c: #4A5C74;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0B1017; --card: #141E2D;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.5);
+    --shadow-phone: 0 6px 24px rgba(0,0,0,.5), 0 1px 6px rgba(0,0,0,.4);
+    --t1: #E4EDF8; --t2: #7E97BB; --t3: #4E6078;
+    --div: #1E2C40; --tag-bg: #1A2638; --tag-c: #7E97BB;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #C2CEDA; --card: #FFFFFF;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.07), 0 4px 14px rgba(0,0,0,.08);
+  --shadow-phone: 0 6px 24px rgba(0,0,0,.22), 0 1px 6px rgba(0,0,0,.14);
+  --t1: #12213A; --t2: #4A5C74; --t3: #8695AC; --div: #D4DCE8;
+  --tag-bg: #E4EBF4; --tag-c: #4A5C74;
+}
+:root[data-theme="dark"] {
+  --bg: #0B1017; --card: #141E2D;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.5);
+  --shadow-phone: 0 6px 24px rgba(0,0,0,.5), 0 1px 6px rgba(0,0,0,.4);
+  --t1: #E4EDF8; --t2: #7E97BB; --t3: #4E6078;
+  --div: #1E2C40; --tag-bg: #1A2638; --tag-c: #7E97BB;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body {
+  background: var(--bg);
+  color: var(--t1);
+  font-family: system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  padding: 52px 20px 80px;
+  min-height: 100vh;
+}
+
+/* ── Page header ── */
+.ph { text-align:center; margin-bottom:52px; }
+.ph h1 { font-size:clamp(1.3rem,3vw,1.85rem); font-weight:800; letter-spacing:-.025em; margin-bottom:8px; }
+.ph p { color:var(--t2); font-size:.88rem; }
+.palette-strip {
+  display:inline-flex; gap:6px; margin-top:14px;
+  background:var(--card); padding:10px 16px; border-radius:40px;
+  box-shadow:var(--shadow-sm);
+}
+.ps { width:22px; height:22px; border-radius:50%; border:1.5px solid rgba(0,0,0,.1); }
+
+/* ── Stage ── */
+.stage {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: 36px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+/* ── Direction column ── */
+.dir { display:flex; flex-direction:column; align-items:center; gap:0; }
+
+.dir-meta {
+  width:100%;
+  background:var(--card);
+  border-radius:14px 14px 0 0;
+  padding:18px 18px 14px;
+  box-shadow:var(--shadow-sm);
+  border-bottom:1px solid var(--div);
+  text-align:center;
+}
+.dir-num { font-size:.65rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--t3); margin-bottom:4px; }
+.dir-name { font-size:1.1rem; font-weight:800; direction:rtl; margin-bottom:4px; }
+.dir-en { font-size:.67rem; color:var(--t3); font-weight:500; letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px; }
+.tags { display:flex; gap:5px; justify-content:center; flex-wrap:wrap; }
+.tag { font-size:.62rem; padding:2px 9px; border-radius:20px; background:var(--tag-bg); color:var(--tag-c); }
+
+.phone-wrap {
+  width:100%;
+  background:var(--card);
+  border-radius:0 0 14px 14px;
+  padding:20px 18px 22px;
+  box-shadow:var(--shadow-sm);
+  display:flex; justify-content:center;
+}
+
+/* ── Phone ── */
+.phone {
+  width:252px;
+  border-radius:22px;
+  overflow:hidden;
+  box-shadow:var(--shadow-phone);
+  direction:rtl;
+}
+
+/* ── DIRECTION A: שמחת ישראל — Bold Game Show ── */
+.a-bar {
+  background:#166534; color:#fff;
+  padding:11px 14px 9px;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.a-bar-t { font-size:.69rem; font-weight:700; }
+.a-bar-p { font-size:.64rem; opacity:.8; }
+.a-body { background:#fff; padding:16px 13px 20px; }
+.a-timer-w { display:flex; justify-content:center; margin-bottom:14px; }
+.a-timer {
+  width:72px; height:72px; border-radius:50%;
+  border:6px solid #16A34A;
+  display:flex; align-items:center; justify-content:center;
+  font-size:26px; font-weight:900; color:#166534;
+}
+.a-q {
+  font-size:.86rem; font-weight:900; text-align:center;
+  line-height:1.38; margin-bottom:14px; color:#14532D;
+  direction:rtl;
+}
+.a-opts { display:flex; flex-direction:column; gap:6px; }
+.a-opt {
+  padding:11px 13px;
+  border-radius:8px;
+  background:#166534; color:#fff;
+  font-size:.74rem; font-weight:700;
+  direction:rtl; text-align:right;
+}
+
+/* ── DIRECTION B: גן ירושלים — Refined Spacious ── */
+.b-bar {
+  background:#fff; color:#166534;
+  padding:10px 14px 8px;
+  display:flex; justify-content:space-between; align-items:center;
+  border-bottom:1px solid #D1FAE5;
+}
+.b-bar-t { font-size:.68rem; font-weight:700; }
+.b-bar-p { font-size:.62rem; color:#4B5563; display:flex; align-items:center; gap:5px; }
+.b-bar-dot { width:6px; height:6px; border-radius:50%; background:#FBBF24; display:inline-block; }
+.b-body { background:#F0FDF4; padding:18px 14px 22px; }
+.b-timer-w { display:flex; justify-content:center; margin-bottom:16px; }
+.b-timer {
+  width:64px; height:64px; border-radius:50%;
+  border:3px solid #FBBF24;
+  display:flex; align-items:center; justify-content:center;
+  font-size:24px; font-weight:800; color:#166534;
+  background:#fff;
+}
+.b-q {
+  font-size:.84rem; font-weight:600; text-align:center;
+  line-height:1.55; margin-bottom:16px; color:#14532D;
+  direction:rtl;
+}
+.b-opts { display:flex; flex-direction:column; gap:9px; }
+.b-opt {
+  padding:10px 13px;
+  border-radius:12px;
+  background:#fff;
+  border:1px solid #D1FAE5;
+  box-shadow:0 1px 4px rgba(22,101,52,.08);
+  font-size:.72rem; font-weight:500; color:#14532D;
+  direction:rtl; text-align:right;
+}
+
+/* ── DIRECTION C: זירת הקרב — Dramatic Split ── */
+.c-top {
+  background:#166534;
+  padding:18px 14px 22px;
+  display:flex; flex-direction:column; align-items:center; gap:10px;
+}
+.c-prog { font-size:.62rem; color:rgba(255,255,255,.7); direction:rtl; }
+.c-timer {
+  width:80px; height:80px; border-radius:50%;
+  border:4px solid rgba(255,255,255,.9);
+  display:flex; align-items:center; justify-content:center;
+  font-size:30px; font-weight:900; color:#fff;
+}
+.c-title { font-size:.62rem; color:rgba(255,255,255,.6); letter-spacing:.06em; text-transform:uppercase; }
+.c-body { background:#fff; padding:16px 13px 20px; }
+.c-q {
+  font-size:.88rem; font-weight:700; text-align:center;
+  line-height:1.48; margin-bottom:16px; color:#14532D;
+  direction:rtl;
+}
+.c-opts { display:flex; flex-direction:column; gap:8px; }
+.c-opt {
+  padding:10px 12px 10px 14px;
+  border-radius:8px;
+  background:#fff;
+  border:1px solid #E5E7EB;
+  border-inline-start:4px solid #16A34A;
+  font-size:.74rem; font-weight:600; color:#14532D;
+  direction:rtl; text-align:right;
+}
+
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<!-- Page header -->
+<div class="ph">
+  <h1>WhatsApp Clickers — כיוונים עיצוביים</h1>
+  <p>ירוק חגיגה × 3 אישיויות — אותה פלטה, אופי שונה לחלוטין</p>
+  <div class="palette-strip" aria-label="פלטת ירוק חגיגה">
+    <div class="ps" style="background:#F0FDF4" title="רקע"></div>
+    <div class="ps" style="background:#FFFFFF;border-color:#D1FAE5" title="משטח"></div>
+    <div class="ps" style="background:#166534" title="ראשי"></div>
+    <div class="ps" style="background:#16A34A" title="הדגשה"></div>
+    <div class="ps" style="background:#14532D" title="טקסט"></div>
+    <div class="ps" style="background:#4B5563" title="משני"></div>
+    <div class="ps" style="background:#FBBF24" title="זהב"></div>
+  </div>
+</div>
+
+<div class="stage">
+
+  <!-- ── Direction A ── -->
+  <div class="dir">
+    <div class="dir-meta">
+      <div class="dir-num">כיוון א</div>
+      <div class="dir-name">שמחת ישראל</div>
+      <div class="dir-en">Bold Game Show</div>
+      <div class="tags">
+        <span class="tag">משקל כבד</span>
+        <span class="tag">אנרגטי</span>
+        <span class="tag">אפשרויות מלאות</span>
+        <span class="tag">צפוף</span>
+      </div>
+    </div>
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="a-bar">
+          <div class="a-bar-t">WhatsApp Clickers</div>
+          <div class="a-bar-p">שאלה 3/10</div>
+        </div>
+        <div class="a-body">
+          <div class="a-timer-w">
+            <div class="a-timer">12</div>
+          </div>
+          <div class="a-q">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="a-opts">
+            <div class="a-opt">א. דוד בן גוריון</div>
+            <div class="a-opt">ב. חיים וייצמן</div>
+            <div class="a-opt">ג. משה שרת</div>
+            <div class="a-opt">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Direction B ── -->
+  <div class="dir">
+    <div class="dir-meta">
+      <div class="dir-num">כיוון ב</div>
+      <div class="dir-name">גן ירושלים</div>
+      <div class="dir-en">Refined &amp; Spacious</div>
+      <div class="tags">
+        <span class="tag">אלגנטי</span>
+        <span class="tag">מרווח</span>
+        <span class="tag">כרטיסיות</span>
+        <span class="tag">זהב</span>
+      </div>
+    </div>
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="b-bar">
+          <div class="b-bar-t">WhatsApp Clickers</div>
+          <div class="b-bar-p"><span class="b-bar-dot"></span>שאלה 3/10</div>
+        </div>
+        <div class="b-body">
+          <div class="b-timer-w">
+            <div class="b-timer">12</div>
+          </div>
+          <div class="b-q">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="b-opts">
+            <div class="b-opt">א. דוד בן גוריון</div>
+            <div class="b-opt">ב. חיים וייצמן</div>
+            <div class="b-opt">ג. משה שרת</div>
+            <div class="b-opt">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Direction C ── -->
+  <div class="dir">
+    <div class="dir-meta">
+      <div class="dir-num">כיוון ג</div>
+      <div class="dir-name">זירת הקרב</div>
+      <div class="dir-en">Dramatic Split</div>
+      <div class="tags">
+        <span class="tag">דרמטי</span>
+        <span class="tag">מפוצל</span>
+        <span class="tag">טיימר ענק</span>
+        <span class="tag">פסים</span>
+      </div>
+    </div>
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="c-top">
+          <div class="c-prog">שאלה 3 מתוך 10</div>
+          <div class="c-timer">12</div>
+          <div class="c-title">שניות נותרו</div>
+        </div>
+        <div class="c-body">
+          <div class="c-q">מי היה ראש הממשלה הראשון של מדינת ישראל?</div>
+          <div class="c-opts">
+            <div class="c-opt">א. דוד בן גוריון</div>
+            <div class="c-opt">ב. חיים וייצמן</div>
+            <div class="c-opt">ג. משה שרת</div>
+            <div class="c-opt">ד. לוי אשכול</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
