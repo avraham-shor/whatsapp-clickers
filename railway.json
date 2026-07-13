@@ -1,11 +1,10 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "cd web && npm ci && npm run build && cd .. && rm -rf server/internal/webdist/dist && mkdir -p server/internal/webdist/dist && cp -r web/dist/. server/internal/webdist/dist/ && cd server && go build -o bin/server ./cmd/server"
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "server/bin/server",
     "numReplicas": 1,
     "healthcheckPath": "/api/health",
     "restartPolicyType": "ON_FAILURE"

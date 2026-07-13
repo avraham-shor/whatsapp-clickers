@@ -98,10 +98,11 @@ do **not** commit it; only the placeholder `index.html` is tracked.
 
 Merges to `main` auto-deploy via Railway's GitHub integration ("wait for CI"
 enabled) — the workflow itself contains no deploy step and no Railway token.
-`railway.json` defines the build (web build → embed → `go build`) and start
-command; `numReplicas: 1` is **mandatory** (the future in-memory WebSocket hub
-assumes a single instance — do not enable autoscaling). `nixpacks.toml`
-requests both Node and Go toolchains.
+The build is defined by the multi-stage `Dockerfile` (node:22 SPA build →
+golang:1.26.5 binary with embedded SPA → minimal alpine runtime); Railway is
+pointed at it via `railway.json`. (Nixpacks was tried first but its toolchains
+are stale — Go 1.22 / Node 18.) `numReplicas: 1` is **mandatory** (the future
+in-memory WebSocket hub assumes a single instance — do not enable autoscaling).
 
 ### Operator runbook — one-time Railway setup (human steps)
 
@@ -116,8 +117,6 @@ requests both Node and Go toolchains.
 5. Confirm replicas = 1 (Settings → Scaling).
 6. Verify the deployed URL: `/` serves the SPA (Hebrew, RTL), `GET /api/health`
    returns 200, and boot logs show `migrations applied`.
-7. If the Nixpacks build fails to resolve Go 1.26.x, switch the service builder
-   or ask the dev to add a Dockerfile — the build steps stay identical.
 
 ### ⚠️ Meta WhatsApp Business setup — start NOW
 

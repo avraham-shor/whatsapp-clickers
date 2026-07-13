@@ -200,6 +200,7 @@ claude-fable-5 (Claude Fable 5)
 - **TypeScript 6 deprecates `baseUrl`** (TS5101) — `paths` now resolve relative to the tsconfig, so `baseUrl` was dropped from both tsconfigs.
 - **shadcn CLI (v4.13) changes** — `-b` now selects primitives library (`radix` chosen = classic shadcn); init offered native `--rtl` flag (enabled, `components.json` has `"rtl": true`); preset `nova` used non-interactively. Init injected `@fontsource-variable/geist` — removed (DESIGN.md mandates system-ui only) and `--font-sans` re-pointed to the system stack.
 - **`go mod tidy` drops import-less deps** — `coder/websocket` (dependency-only this story) pinned via `server/deps.go` under a never-built `pin_deps` tag.
+- **Railway Nixpacks build failed on stale toolchains (2026-07-13)** — operator's first deploy resolved Go 1.22.1 + Node 18 (nixpacks 1.41 snapshot), tripping EBADENGINE on Vite 8/ESLint 10 deps. Replaced with a multi-stage `Dockerfile` (node:22-alpine → golang:1.26.5-alpine → alpine:3.21, CGO disabled), `railway.json` switched to `"builder": "DOCKERFILE"`, `nixpacks.toml` removed. Image verified locally: build succeeds, container boots against Postgres, migrations idempotent (count:0 on already-migrated DB), health 200, SPA RTL served.
 
 ### Completion Notes List
 
@@ -216,8 +217,9 @@ claude-fable-5 (Claude Fable 5)
 New:
 - .github/workflows/ci.yml
 - .gitignore
+- .dockerignore
+- Dockerfile
 - Makefile
-- nixpacks.toml
 - railway.json
 - server/.env.example
 - server/cmd/server/main.go
@@ -269,3 +271,4 @@ Deleted:
 ## Change Log
 
 - 2026-07-10: Story 1.1 Tasks 1–7 implemented and verified (walking skeleton: repo, GitHub, Go server, React SPA, embed, CI green on Actions, Railway config). Task 8 operator steps handed off. Commits: 01552a0 (baseline), 68ab168 (skeleton).
+- 2026-07-13: Railway build fix — Nixpacks (stale Go 1.22/Node 18) replaced with multi-stage Dockerfile, verified locally end-to-end; nixpacks.toml removed (transient, never a File List entry in final state).

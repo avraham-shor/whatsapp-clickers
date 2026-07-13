@@ -1,3 +1,0 @@
-# Railway builds from the repo root; both toolchains are needed because the
-# build compiles the SPA (Node) and embeds it into the Go binary.
-providers = ["node", "go"]

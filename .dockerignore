@@ -1,0 +1,11 @@
+.git
+**/node_modules
+web/dist
+server/bin
+server/.env
+_bmad
+_bmad-output
+docs
+.claude
+.github
+.vscode
