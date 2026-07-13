@@ -17,7 +17,8 @@ RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
 
 # Stage 3: minimal runtime
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -H app
 COPY --from=server /out/server /app/server
+USER app
 EXPOSE 8080
 CMD ["/app/server"]

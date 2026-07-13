@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -33,6 +35,9 @@ func NewRouter(db Pinger, static fs.FS) http.Handler {
 		}
 		spa(w, req)
 	})
+	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed for this endpoint")
+	})
 
 	return r
 }
@@ -50,7 +55,11 @@ func isReservedPath(path string) bool {
 
 func handleHealth(db Pinger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := db.Ping(r.Context()); err != nil {
+		// Bound server-side so a black-holed DB yields a prompt 503
+		// instead of hanging until the client gives up.
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
 			writeError(w, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "database is unreachable")
 			return
 		}
@@ -73,6 +82,12 @@ func spaHandler(static fs.FS) http.HandlerFunc {
 		if f, err := static.Open(name); err == nil {
 			f.Close()
 			http.FileServerFS(static).ServeHTTP(w, r)
+			return
+		}
+		// A missing file-like path (e.g. a stale hashed bundle after a
+		// redeploy) must 404, not serve index.html as if it were a route.
+		if path.Ext(name) != "" {
+			http.NotFound(w, r)
 			return
 		}
 		http.ServeFileFS(w, r, static, "index.html")

@@ -2,6 +2,9 @@
 **/node_modules
 web/dist
 server/bin
+# local `make build` output must never leak into the image; stage 2 gets
+# the freshly built SPA via COPY --from=web
+server/internal/webdist/dist
 server/.env
 _bmad
 _bmad-output

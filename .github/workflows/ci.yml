@@ -20,6 +20,14 @@ jobs:
         with:
           go-version: '1.26.x'
           cache-dependency-path: server/go.sum
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt violations:"
+            echo "$unformatted"
+            exit 1
+          fi
       - name: go vet
         run: go vet ./...
       - name: go test
@@ -28,6 +36,8 @@ jobs:
         run: |
           go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
           sqlc generate
+          # intent-to-add makes newly generated (untracked) files fail the diff too
+          git add -N internal/store/gen
           git diff --exit-code -- internal/store/gen
 
   frontend:
@@ -50,6 +60,22 @@ jobs:
         run: npx tsc -b --noEmit
       - name: build
         run: npm run build
+      - name: filter-safety on built bundle (UX-DR4)
+        # Bundled node_modules CSS lands in dist — the source scan can't see
+        # it, so check the shipped CSS and index.html for external fetches.
+        run: |
+          status=0
+          matches=$(grep -rnE \
+            -e 'url\(\s*.?(https?:)?//' \
+            -e '@import' \
+            -e '(src|href|srcset)\s*=\s*.?.?(https?:)?//' \
+            -e 'fonts\.(googleapis|gstatic)' \
+            dist/index.html dist/assets/*.css 2>/dev/null) || status=$?
+          if [ "$status" -eq 1 ]; then echo "filter-safety (bundle): clean"; exit 0; fi
+          if [ "$status" -ne 0 ]; then echo "filter-safety (bundle): grep error (exit $status)"; exit "$status"; fi
+          echo "External asset references in built bundle (filter-safety violation, UX-DR4):"
+          echo "$matches"
+          exit 1
 
   filter-safety:
     runs-on: ubuntu-latest
@@ -57,18 +83,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: No external URL assets (UX-DR4)
         run: |
-          matches=$(grep -rnF --exclude-dir=node_modules --exclude-dir=dist \
-            -e 'url(http' \
-            -e 'src="http' \
-            -e "src='http" \
-            -e 'href="http' \
-            -e "href='http" \
-            -e '@import url(' \
-            -e 'fonts.googleapis' \
-            web/ || true)
-          if [ -n "$matches" ]; then
-            echo "External asset references found (filter-safety violation, UX-DR4):"
-            echo "$matches"
-            exit 1
-          fi
-          echo "filter-safety: clean"
+          status=0
+          matches=$(grep -rnE --exclude-dir=node_modules --exclude-dir=dist \
+            -e 'url\(\s*.?(https?:)?//' \
+            -e '(src|href|srcset)\s*=\s*.?.?(https?:)?//' \
+            -e '@import\s+(url\(\s*)?.?.?(https?:)?//' \
+            -e 'fonts\.(googleapis|gstatic)' \
+            web/) || status=$?
+          if [ "$status" -eq 1 ]; then echo "filter-safety: clean"; exit 0; fi
+          if [ "$status" -ne 0 ]; then echo "filter-safety: grep error (exit $status)"; exit "$status"; fi
+          echo "External asset references found (filter-safety violation, UX-DR4):"
+          echo "$matches"
+          exit 1

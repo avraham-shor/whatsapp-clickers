@@ -5,9 +5,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/avraham-shor/whatsapp-clickers/internal/config"
@@ -34,7 +37,10 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("configuration loaded")
 
-	ctx := context.Background()
+	// Railway sends SIGTERM on every redeploy; drain in-flight requests
+	// instead of dropping them.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	pool, err := store.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -63,7 +69,31 @@ func run(logger *slog.Logger) error {
 		Addr:              ":" + cfg.Port,
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		// WriteTimeout must not outlive long-lived connections; /ws
+		// (story 2.3) hijacks the conn, which clears these deadlines.
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  2 * time.Minute,
 	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
 	logger.Info("server listening", "port", cfg.Port)
-	return srv.ListenAndServe()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		logger.Info("shutdown signal received, draining")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		if err := <-errCh; !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		logger.Info("server stopped cleanly")
+		return nil
+	}
 }

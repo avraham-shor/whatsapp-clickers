@@ -104,6 +104,40 @@ func TestSPAClientRouteFallsBackToIndex(t *testing.T) {
 	}
 }
 
+func TestMissingAssetReturns404(t *testing.T) {
+	router := NewRouter(stubPinger{}, testStatic())
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-OLDHASH.js", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET missing asset = %d, want 404 (no index.html fallback)", rec.Code)
+	}
+	if got := rec.Body.String(); strings.Contains(got, "app shell") {
+		t.Errorf("missing asset served index.html content: %q", got)
+	}
+}
+
+func TestMethodNotAllowedReturnsJSONError(t *testing.T) {
+	router := NewRouter(stubPinger{}, testStatic())
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/health", nil))
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /api/health = %d, want 405", rec.Code)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("405 body is not JSON envelope: %v", err)
+	}
+	if body.Error.Code != "METHOD_NOT_ALLOWED" {
+		t.Errorf("error code = %q, want METHOD_NOT_ALLOWED", body.Error.Code)
+	}
+}
+
 func TestUnknownAPIRouteReturnsJSONError(t *testing.T) {
 	router := NewRouter(stubPinger{}, testStatic())
 	for _, path := range []string{"/api/nope", "/ws", "/webhooks/whatsapp"} {

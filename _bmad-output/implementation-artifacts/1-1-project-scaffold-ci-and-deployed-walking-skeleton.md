@@ -4,7 +4,7 @@ baseline_commit: NO_VCS
 
 # Story 1.1: Project Scaffold, CI, and Deployed Walking Skeleton
 
-Status: review
+Status: done
 
 ## Story
 
@@ -65,6 +65,28 @@ so that every subsequent story builds and ships on working rails.
   - [x] Railway: create project in **EU region**, one service linked to the GitHub repo (deploy on push to main, "wait for CI" enabled), add managed PostgreSQL, set env vars, confirm replicas = 1
   - [x] Verify deployed URL: `/` serves SPA (RTL, Hebrew), `/api/health` → 200, boot logs show goose ran
   - [x] ⚠️ Kick off Meta WhatsApp Business setup NOW (business verification + dedicated number) — the only external lead-time item; it gates Epic 2. Re-verify Meta service-window pricing (≈₪0 conclusion) when the account exists
+
+### Review Findings
+
+Adversarial code review 2026-07-13 (Blind Hunter + Edge Case Hunter + Acceptance Auditor, diff 01552a0..HEAD). Verdict: no AC violations; all findings below are hardening/hygiene. 2 findings dismissed as noise.
+
+- [x] [Review][Defer] Spacing scale "no values between stops" declared but not enforced — Tailwind v4's default `--spacing: 0.25rem` multiplier still generates off-scale utilities; enforcing via `--spacing: initial` would break shadcn defaults (e.g. button `h-9`). Deferred (owner decision 2026-07-13): enforcement call needs real UI to validate against — revisit at the first real UI story (1.3) [web/src/index.css]
+- [x] [Review][Patch] SPA fallback returns 200+index.html for missing static assets — stale clients requesting old hashed bundles after a redeploy get HTML (white screen, MIME error) while logs show 200s; return 404 for file-like/`assets/` paths [server/internal/httpapi/router.go:73]
+- [x] [Review][Patch] No graceful shutdown — Railway sends SIGTERM on every redeploy; in-flight requests are truncated and `defer pool.Close()` never runs; add `signal.NotifyContext` + `srv.Shutdown` [server/cmd/server/main.go:62]
+- [x] [Review][Patch] `http.Server` missing `ReadTimeout`/`WriteTimeout`/`IdleTimeout` — slow clients hold connections indefinitely (slowloris surface) [server/cmd/server/main.go:62]
+- [x] [Review][Patch] sqlc drift gate blind to untracked generated files — `git diff --exit-code` ignores new untracked `gen/*.go`; add `git add -N .` (or `git status --porcelain` check) before the diff [.github/workflows/ci.yml:50]
+- [x] [Review][Patch] Filter-safety grep bypassable and swallows its own errors — quoted `url("http`, protocol-relative `//`, `srcset=` slip through; `|| true` masks grep exit 2; also blind to bundled node_modules CSS imports (scan built `web/dist` too) [.github/workflows/ci.yml:77]
+- [x] [Review][Patch] TypeScript `strict` mode absent from both tsconfigs — undocumented drop from the Vite template default; no `strictNullChecks`/`noImplicitAny` behind the `tsc -b` CI gate [web/tsconfig.app.json, web/tsconfig.node.json]
+- [x] [Review][Patch] Non-hermetic builds around `webdist/dist` — `.dockerignore` doesn't exclude `server/internal/webdist/dist` (stale local assets merge into the image); `make build` dirties the tracked placeholder; `make clean` can't restore it [.dockerignore, Makefile]
+- [x] [Review][Patch] 405 responses violate the JSON error envelope — `r.MethodNotAllowed` never set; `POST /api/health` returns bare text 405 [server/internal/httpapi/router.go:24]
+- [x] [Review][Patch] Health handler DB ping has no server-side timeout — black-holed DB hangs the request instead of prompt 503; wrap with `context.WithTimeout` [server/internal/httpapi/router.go:51]
+- [x] [Review][Patch] `make dev` always exits 0 — backend fail-fast leaves Vite running against a dead proxy with no failure signal; propagate job exit status [Makefile:8]
+- [x] [Review][Patch] CI has no gofmt step though the Makefile `lint` comment claims CI parity — unformatted Go merges cleanly [.github/workflows/ci.yml]
+- [x] [Review][Patch] goose migrations run without a Postgres session lock — Railway zero-downtime redeploys can overlap boots; add `goose.WithSessionLocker` [server/internal/store/migrate.go]
+- [x] [Review][Patch] Production container runs as root — no `USER` directive in the runtime stage; add non-root user [Dockerfile:21]
+- [x] [Review][Patch] Dev Agent Record internal contradictions — variance (5) still claims `nixpacks.toml` exists (removed 2026-07-13); File List note says sprint-status → in-progress (actual: review); root `.gitignore` listed as New though it's in baseline 01552a0 [this file]
+- [x] [Review][Patch] README Meta section says "start NOW" — contradicts the recorded owner decision to defer setup to Epic 2 start [README.md]
+- [x] [Review][Defer] Fail-fast config accepts placeholder secrets (`SESSION_SECRET=change-me…` passes) — deferred: by design while vars are unconsumed per runbook; add strength/placeholder checks when Story 1.2 consumes SESSION_SECRET and Epic 2 consumes webhook secrets [server/internal/config/config.go:718]
 
 ## Dev Notes
 
@@ -209,7 +231,7 @@ claude-fable-5 (Claude Fable 5)
 - CI run on GitHub Actions (commit 68ab168): **all three jobs green** — backend (go vet, go test, sqlc v1.31.1 diff-check), frontend (npm ci, eslint, tsc -b --noEmit, build), filter-safety grep. Grep verified locally to fail on a `fonts.googleapis` reference and pass on the clean tree.
 - Local quality gates all pass: `gofmt` (clean), `go vet`, `go test ./...` (config + httpapi suites), `sqlc generate` (empty diff), `eslint`, `tsc -b --noEmit`, `npm run build`.
 - Wire-format/architecture guardrails honored: camelCase direct payload + SCREAMING_SNAKE error envelope from the health endpoint; `store` is the only package importing pgx (goose runs inside `store.Migrate`); Hebrew copy only in `strings.he.ts`; gold token defined but never applied.
-- **Intentional variances (documented):** (1) local Node is 25.6 (CI pins 22.x — the gate is authoritative); (2) oxlint→ESLint swap per AC3; (3) `baseUrl` removed per TS6; (4) goose runs via the v3 Provider API (structured results, no stray plain-text logs) rather than global `SetBaseFS` — same embedded-FS boot behavior the task specifies; (5) `nixpacks.toml` added so Railway's builder provisions both Node and Go (README troubleshooting covers fallback if Nixpacks lacks Go 1.26).
+- **Intentional variances (documented):** (1) local Node is 25.6 (CI pins 22.x — the gate is authoritative); (2) oxlint→ESLint swap per AC3; (3) `baseUrl` removed per TS6; (4) goose runs via the v3 Provider API (structured results, no stray plain-text logs) rather than global `SetBaseFS` — same embedded-FS boot behavior the task specifies; (5) Railway builds via a multi-stage `Dockerfile`, not Nixpacks — Nixpacks was tried first and replaced 2026-07-13 because its toolchain snapshot was stale (Go 1.22 / Node 18); see Debug Log.
 - **Task 8 executed by operator 2026-07-13, deployment verified live:** https://whatsapp-clickers-production.up.railway.app — `/api/health` → 200 `{"db":"ok","status":"ok"}` (proves DB + goose ran), `/` serves the RTL Hebrew SPA, `/display/test` → 200 (SPA fallback), `/api/nope` → 404 error envelope. First Nixpacks deploy failed on stale toolchains → fixed with Dockerfile (see Debug Log); second failure was missing env vars (fail-fast worked as designed) → operator set Variables → healthy.
 - **Meta subtask resolution (owner decision, 2026-07-13):** the pricing re-verification was completed early against official Meta docs — service messages free AND service-window replies exempt from tier messaging limits; the ≈₪0 conclusion holds and is stronger than assumed. The setup kickoff itself was **consciously deferred by the owner** (no Facebook account / no registered business yet): plan = personal FB account created now to age, free Business Portfolio + test number at Epic 2 start (~30 min, no business entity needed), business verification deferred until the system proves itself. An unverified WABA suffices for a modest pilot (user-initiated flow). Documented in README runbook and project memory; revisit at Story 2.1.
 
@@ -217,7 +239,7 @@ claude-fable-5 (Claude Fable 5)
 
 New:
 - .github/workflows/ci.yml
-- .gitignore
+- .gitignore (created in baseline commit 01552a0, Task 1)
 - .dockerignore
 - Dockerfile
 - Makefile
@@ -264,7 +286,7 @@ New:
 
 Modified:
 - README.md (was empty — full project README + operator runbook)
-- _bmad-output/implementation-artifacts/sprint-status.yaml (story → in-progress)
+- _bmad-output/implementation-artifacts/sprint-status.yaml (story status tracking: in-progress, then review)
 
 Deleted:
 - test.js (unrelated debris)
@@ -274,3 +296,4 @@ Deleted:
 - 2026-07-10: Story 1.1 Tasks 1–7 implemented and verified (walking skeleton: repo, GitHub, Go server, React SPA, embed, CI green on Actions, Railway config). Task 8 operator steps handed off. Commits: 01552a0 (baseline), 68ab168 (skeleton).
 - 2026-07-13: Railway build fix — Nixpacks (stale Go 1.22/Node 18) replaced with multi-stage Dockerfile, verified locally end-to-end; nixpacks.toml removed (transient, never a File List entry in final state).
 - 2026-07-13: Task 8 completed by operator — Railway project live (EU, Postgres, replicas=1), deployment verified at whatsapp-clickers-production.up.railway.app (health 200, RTL SPA, migrations ran). Meta pricing re-verified from official docs (≈₪0 confirmed + tier-limit exemption for service-window replies); Meta account setup deferred to Epic 2 start by owner decision. All ACs satisfied → Status: review.
+- 2026-07-13: Adversarial code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor): no AC violations; 15 patch findings applied and verified (graceful shutdown + server timeouts, SPA asset-404, 405 JSON envelope, health ping timeout, goose session lock, sqlc gate `git add -N`, filter-safety grep hardened + built-bundle scan, gofmt in CI, TS `strict`, webdist build hygiene, `make dev` exit status, non-root container, doc fixes); 2 deferred to deferred-work.md (spacing-scale enforcement → 1.3, placeholder-secret validation → 1.2/2.1). All gates green (gofmt, vet, test incl. 2 new, eslint, tsc strict, build, filter-safety). Status: done.

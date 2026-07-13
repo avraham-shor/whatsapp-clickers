@@ -91,8 +91,9 @@ do **not** commit it; only the placeholder `index.html` is tracked.
 ## CI
 
 `.github/workflows/ci.yml` gates every PR and push to main:
-`go vet`, `go test`, sqlc generate diff-check (pinned v1.31.1), eslint,
-`tsc -b --noEmit`, frontend build, and the filter-safety grep.
+`gofmt`, `go vet`, `go test`, sqlc generate diff-check (pinned v1.31.1),
+eslint, `tsc -b --noEmit`, frontend build, and the filter-safety grep (source
+tree + built bundle).
 
 ## Deployment (Railway)
 
@@ -118,13 +119,15 @@ in-memory WebSocket hub assumes a single instance — do not enable autoscaling)
 6. Verify the deployed URL: `/` serves the SPA (Hebrew, RTL), `GET /api/health`
    returns 200, and boot logs show `migrations applied`.
 
-### ⚠️ Meta WhatsApp Business setup — start NOW
+### Meta WhatsApp Business setup — deferred to Epic 2 start (owner decision 2026-07-13)
 
-Business verification and a dedicated phone number have multi-week lead time
-and gate Epic 2. Create the Meta Business account, start verification, and
-acquire the WhatsApp Business number as early as possible. When the account
-exists, re-verify the service-window pricing assumption (≈₪0 for
-user-initiated sessions).
+Setup plan: a personal Facebook account was created now so it ages; at Epic 2
+start, create a free Business Portfolio + test number (~30 min, no registered
+business entity needed). Full business verification is deferred until the
+system proves itself — an unverified WABA suffices for a modest pilot on the
+user-initiated flow. Pricing was re-verified against official Meta docs
+(2026-07-13): service messages are free AND service-window replies are exempt
+from tier messaging limits, so the ≈₪0 assumption holds. Revisit at Story 2.1.
 
 ## Custom domain (open decision — not implemented)
 
