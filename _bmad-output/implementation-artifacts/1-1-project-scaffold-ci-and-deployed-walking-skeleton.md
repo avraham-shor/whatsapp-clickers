@@ -4,7 +4,7 @@ baseline_commit: NO_VCS
 
 # Story 1.1: Project Scaffold, CI, and Deployed Walking Skeleton
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -61,10 +61,10 @@ so that every subsequent story builds and ships on working rails.
   - [x] `railway.json`: build command = web build + copy + `go build`; start command = the binary; `numReplicas: 1` (MANDATORY — in-memory hub assumes single instance)
   - [x] `.env.example` at `/server` documenting: `DATABASE_URL`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `ANTHROPIC_API_KEY`, `SESSION_SECRET`, `PORT` — placeholder values, no secrets
   - [x] README runbook for the operator steps (see Task 8) + local dev setup (local Postgres via Docker, `make dev`, Windows notes)
-- [ ] Task 8: Operator setup (HUMAN steps — document, do not fake) (AC: 3)
-  - [ ] Railway: create project in **EU region**, one service linked to the GitHub repo (deploy on push to main, "wait for CI" enabled), add managed PostgreSQL, set env vars, confirm replicas = 1
-  - [ ] Verify deployed URL: `/` serves SPA (RTL, Hebrew), `/api/health` → 200, boot logs show goose ran
-  - [ ] ⚠️ Kick off Meta WhatsApp Business setup NOW (business verification + dedicated number) — the only external lead-time item; it gates Epic 2. Re-verify Meta service-window pricing (≈₪0 conclusion) when the account exists
+- [x] Task 8: Operator setup (HUMAN steps — document, do not fake) (AC: 3)
+  - [x] Railway: create project in **EU region**, one service linked to the GitHub repo (deploy on push to main, "wait for CI" enabled), add managed PostgreSQL, set env vars, confirm replicas = 1
+  - [x] Verify deployed URL: `/` serves SPA (RTL, Hebrew), `/api/health` → 200, boot logs show goose ran
+  - [x] ⚠️ Kick off Meta WhatsApp Business setup NOW (business verification + dedicated number) — the only external lead-time item; it gates Epic 2. Re-verify Meta service-window pricing (≈₪0 conclusion) when the account exists
 
 ## Dev Notes
 
@@ -210,7 +210,8 @@ claude-fable-5 (Claude Fable 5)
 - Local quality gates all pass: `gofmt` (clean), `go vet`, `go test ./...` (config + httpapi suites), `sqlc generate` (empty diff), `eslint`, `tsc -b --noEmit`, `npm run build`.
 - Wire-format/architecture guardrails honored: camelCase direct payload + SCREAMING_SNAKE error envelope from the health endpoint; `store` is the only package importing pgx (goose runs inside `store.Migrate`); Hebrew copy only in `strings.he.ts`; gold token defined but never applied.
 - **Intentional variances (documented):** (1) local Node is 25.6 (CI pins 22.x — the gate is authoritative); (2) oxlint→ESLint swap per AC3; (3) `baseUrl` removed per TS6; (4) goose runs via the v3 Provider API (structured results, no stray plain-text logs) rather than global `SetBaseFS` — same embedded-FS boot behavior the task specifies; (5) `nixpacks.toml` added so Railway's builder provisions both Node and Go (README troubleshooting covers fallback if Nixpacks lacks Go 1.26).
-- Railway deploy itself is unverified until Task 8 is executed by the operator (dashboard-only steps; no Railway account access from this environment).
+- **Task 8 executed by operator 2026-07-13, deployment verified live:** https://whatsapp-clickers-production.up.railway.app — `/api/health` → 200 `{"db":"ok","status":"ok"}` (proves DB + goose ran), `/` serves the RTL Hebrew SPA, `/display/test` → 200 (SPA fallback), `/api/nope` → 404 error envelope. First Nixpacks deploy failed on stale toolchains → fixed with Dockerfile (see Debug Log); second failure was missing env vars (fail-fast worked as designed) → operator set Variables → healthy.
+- **Meta subtask resolution (owner decision, 2026-07-13):** the pricing re-verification was completed early against official Meta docs — service messages free AND service-window replies exempt from tier messaging limits; the ≈₪0 conclusion holds and is stronger than assumed. The setup kickoff itself was **consciously deferred by the owner** (no Facebook account / no registered business yet): plan = personal FB account created now to age, free Business Portfolio + test number at Epic 2 start (~30 min, no business entity needed), business verification deferred until the system proves itself. An unverified WABA suffices for a modest pilot (user-initiated flow). Documented in README runbook and project memory; revisit at Story 2.1.
 
 ### File List
 
@@ -272,3 +273,4 @@ Deleted:
 
 - 2026-07-10: Story 1.1 Tasks 1–7 implemented and verified (walking skeleton: repo, GitHub, Go server, React SPA, embed, CI green on Actions, Railway config). Task 8 operator steps handed off. Commits: 01552a0 (baseline), 68ab168 (skeleton).
 - 2026-07-13: Railway build fix — Nixpacks (stale Go 1.22/Node 18) replaced with multi-stage Dockerfile, verified locally end-to-end; nixpacks.toml removed (transient, never a File List entry in final state).
+- 2026-07-13: Task 8 completed by operator — Railway project live (EU, Postgres, replicas=1), deployment verified at whatsapp-clickers-production.up.railway.app (health 200, RTL SPA, migrations ran). Meta pricing re-verified from official docs (≈₪0 confirmed + tier-limit exemption for service-window replies); Meta account setup deferred to Epic 2 start by owner decision. All ACs satisfied → Status: review.
