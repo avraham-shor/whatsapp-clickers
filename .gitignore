@@ -21,6 +21,7 @@ server/internal/webdist/dist/*
 *.swp
 .DS_Store
 Thumbs.db
+.claude/*
 
 # NOTE: _bmad/, _bmad-output/, docs/ are intentionally tracked — planning
 # artifacts stay in the repo.
