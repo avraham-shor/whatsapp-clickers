@@ -22,10 +22,30 @@ type Pinger interface {
 
 // NewRouter builds the full HTTP handler. static holds the built SPA
 // (index.html at its root); nil disables static serving (API-only).
-func NewRouter(db Pinger, static fs.FS) http.Handler {
+func NewRouter(db Pinger, authSvc AuthService, static fs.FS) http.Handler {
 	r := chi.NewRouter()
 
-	r.Get("/api/health", handleHealth(db))
+	r.Route("/api", func(api chi.Router) {
+		// The subrouter does not inherit the root handlers set below —
+		// declare the JSON envelopes explicitly for the API branch.
+		api.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "no such endpoint")
+		})
+		api.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed for this endpoint")
+		})
+
+		// Public: health (Railway monitoring) and login itself.
+		api.Get("/health", handleHealth(db))
+		api.Post("/auth/login", handleLogin(authSvc))
+
+		// Everything else on the API branch requires a live session.
+		api.Group(func(protected chi.Router) {
+			protected.Use(RequireOrganizer(authSvc))
+			protected.Post("/auth/logout", handleLogout(authSvc))
+			protected.Get("/auth/me", handleMe())
+		})
+	})
 
 	spa := spaHandler(static)
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {

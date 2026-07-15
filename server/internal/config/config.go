@@ -22,6 +22,9 @@ type Config struct {
 
 const defaultPort = "8080"
 
+// minSessionSecretLen guards against weak HMAC keys for session tokens.
+const minSessionSecretLen = 32
+
 // Load reads the process environment. It returns an error naming every
 // missing required variable so the operator can fix them all in one pass.
 func Load() (*Config, error) {
@@ -52,9 +55,26 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 		return nil, fmt.Errorf("missing required environment variables: %s (see server/.env.example)", strings.Join(missing, ", "))
 	}
 
+	if err := validateSessionSecret(cfg.SessionSecret); err != nil {
+		return nil, err
+	}
+
 	cfg.Port = defaultPort
 	if port, ok := lookup("PORT"); ok && port != "" {
 		cfg.Port = port
 	}
 	return cfg, nil
+}
+
+// validateSessionSecret rejects secrets that cannot safely sign session
+// tokens: the documented placeholder and anything shorter than 32 chars.
+func validateSessionSecret(secret string) error {
+	const hint = "generate one with `openssl rand -base64 48` (see server/.env.example)"
+	if strings.HasPrefix(secret, "change-me") {
+		return fmt.Errorf("SESSION_SECRET is still the documented placeholder; %s", hint)
+	}
+	if len(secret) < minSessionSecretLen {
+		return fmt.Errorf("SESSION_SECRET must be at least %d characters, got %d; %s", minSessionSecretLen, len(secret), hint)
+	}
+	return nil
 }

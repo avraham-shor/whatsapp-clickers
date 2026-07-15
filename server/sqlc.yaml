@@ -8,3 +8,12 @@ sql:
         package: "gen"
         out: "internal/store/gen"
         sql_package: "pgx/v5"
+        # Keep pgx types out of generated models: uuid/timestamptz columns are
+        # all NOT NULL, so plain string/time.Time scan cleanly through pgx.
+        overrides:
+          - db_type: "uuid"
+            go_type: "string"
+          - db_type: "pg_catalog.timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            go_type: "time.Time"

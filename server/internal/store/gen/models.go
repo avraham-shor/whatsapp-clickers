@@ -3,3 +3,22 @@
 //   sqlc v1.31.1
 
 package gen
+
+import (
+	"time"
+)
+
+type Organizer struct {
+	ID           string
+	Username     string
+	PasswordHash string
+	CreatedAt    time.Time
+}
+
+type Session struct {
+	ID          string
+	OrganizerID string
+	TokenHash   string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}

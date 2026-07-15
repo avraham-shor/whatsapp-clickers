@@ -20,7 +20,7 @@ func fullEnv() map[string]string {
 		"WHATSAPP_APP_SECRET":      "secret",
 		"WHATSAPP_VERIFY_TOKEN":    "verify",
 		"ANTHROPIC_API_KEY":        "key",
-		"SESSION_SECRET":           "session",
+		"SESSION_SECRET":           "test-session-secret-0123456789abcdef",
 	}
 }
 
@@ -32,8 +32,8 @@ func TestLoadAllRequiredPresent(t *testing.T) {
 	if cfg.DatabaseURL != "postgres://localhost:5432/app" {
 		t.Errorf("DatabaseURL = %q, want %q", cfg.DatabaseURL, "postgres://localhost:5432/app")
 	}
-	if cfg.SessionSecret != "session" {
-		t.Errorf("SessionSecret = %q, want %q", cfg.SessionSecret, "session")
+	if cfg.SessionSecret != "test-session-secret-0123456789abcdef" {
+		t.Errorf("SessionSecret = %q, want %q", cfg.SessionSecret, "test-session-secret-0123456789abcdef")
 	}
 }
 
@@ -88,6 +88,68 @@ func TestLoadEmptyValueCountsAsMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
 		t.Errorf("error %q does not name empty var ANTHROPIC_API_KEY", err.Error())
+	}
+}
+
+func TestLoadSessionSecretTooShortRejected(t *testing.T) {
+	env := fullEnv()
+	env["SESSION_SECRET"] = "only-31-characters-long-secret!" // 31 chars
+
+	_, err := load(lookupFromMap(env))
+	if err == nil {
+		t.Fatal("load() succeeded with short SESSION_SECRET, want error")
+	}
+	if !strings.Contains(err.Error(), "SESSION_SECRET") {
+		t.Errorf("error %q does not name SESSION_SECRET", err.Error())
+	}
+	if !strings.Contains(err.Error(), "openssl rand") {
+		t.Errorf("error %q does not tell the operator how to generate a secret", err.Error())
+	}
+}
+
+func TestLoadSessionSecretPlaceholderRejected(t *testing.T) {
+	env := fullEnv()
+	// Long enough to pass the length gate — must still be rejected because
+	// it is the documented placeholder.
+	env["SESSION_SECRET"] = "change-me-long-random-string-padded-well-past-32"
+
+	_, err := load(lookupFromMap(env))
+	if err == nil {
+		t.Fatal("load() succeeded with placeholder SESSION_SECRET, want error")
+	}
+	if !strings.Contains(err.Error(), "SESSION_SECRET") {
+		t.Errorf("error %q does not name SESSION_SECRET", err.Error())
+	}
+	if !strings.Contains(err.Error(), "openssl rand") {
+		t.Errorf("error %q does not tell the operator how to generate a secret", err.Error())
+	}
+}
+
+func TestLoadSessionSecretExactMinimumLengthPasses(t *testing.T) {
+	env := fullEnv()
+	// Exactly the 32-char minimum — pins the boundary so an off-by-one in
+	// the length comparison is caught from both sides (31 is rejected above).
+	env["SESSION_SECRET"] = strings.Repeat("x", 32)
+
+	cfg, err := load(lookupFromMap(env))
+	if err != nil {
+		t.Fatalf("load() rejected a SESSION_SECRET of exactly 32 chars: %v", err)
+	}
+	if cfg.SessionSecret != env["SESSION_SECRET"] {
+		t.Errorf("SessionSecret = %q, want the provided 32-char value", cfg.SessionSecret)
+	}
+}
+
+func TestLoadSessionSecretRealValuePasses(t *testing.T) {
+	env := fullEnv()
+	env["SESSION_SECRET"] = "kJ8vN2xQ5wR9tY3uI6oP1aS4dF7gH0jZbC8eM5nV2xL9"
+
+	cfg, err := load(lookupFromMap(env))
+	if err != nil {
+		t.Fatalf("load() rejected a real SESSION_SECRET: %v", err)
+	}
+	if cfg.SessionSecret != env["SESSION_SECRET"] {
+		t.Errorf("SessionSecret = %q, want the provided value", cfg.SessionSecret)
 	}
 }
 

@@ -115,9 +115,36 @@ in-memory WebSocket hub assumes a single instance — do not enable autoscaling)
    `DATABASE_URL` (reference the Railway Postgres variable), the five WhatsApp/
    Anthropic secrets (dummy values acceptable until Epics 2–3), and
    `SESSION_SECRET` (long random string). Railway injects `PORT` itself.
+
+   ⚠️ **`SESSION_SECRET` is enforced since Story 1.2**: the server refuses to
+   boot if it is shorter than 32 characters or still starts with `change-me`.
+   The value set during the 1.1 setup was the placeholder — **replace it in
+   Railway Variables with a real random value (`openssl rand -base64 48`)
+   BEFORE merging Story 1.2 to `main`**, or the next deploy will fail fast at
+   boot (by design).
 5. Confirm replicas = 1 (Settings → Scaling).
 6. Verify the deployed URL: `/` serves the SPA (Hebrew, RTL), `GET /api/health`
    returns 200, and boot logs show `migrations applied`.
+
+### Provisioning an Organizer
+
+There is no self-serve signup in the pilot; accounts are created with the
+provisioning CLI. It is safe to re-run — an existing username gets its
+password replaced. The `organizers` table must exist first: the server
+applies migrations at boot, so boot the Story 1.2 (or later) server once
+against that database before provisioning.
+
+Local (Git Bash; password via stdin — never as an argument):
+
+```
+cd server
+echo -n 'the-password' | DATABASE_URL='postgres://postgres:dev@localhost:5432/whatsapp_clickers' go run ./cmd/provision -username avraham
+```
+
+Production: copy the **public** `DATABASE_URL` from the Railway Postgres
+service's Connect tab and run the same command with it. Running the command
+without piping input prompts for the password interactively (input is echoed
+— prefer the piped form on a shared screen).
 
 ### Meta WhatsApp Business setup — deferred to Epic 2 start (owner decision 2026-07-13)
 

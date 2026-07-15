@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/avraham-shor/whatsapp-clickers/internal/auth"
 	"github.com/avraham-shor/whatsapp-clickers/internal/config"
 	"github.com/avraham-shor/whatsapp-clickers/internal/httpapi"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
@@ -63,7 +64,8 @@ func run(logger *slog.Logger) error {
 	logger.Info("migrations applied", "count", applied)
 
 	st := store.New(pool)
-	router := httpapi.NewRouter(st, webdist.FS())
+	authSvc := auth.NewService(st, cfg.SessionSecret)
+	router := httpapi.NewRouter(st, authSvc, webdist.FS())
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
