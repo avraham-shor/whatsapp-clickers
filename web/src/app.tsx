@@ -3,8 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 
 import { api, ApiError } from '@/lib/api'
 import { strings } from '@/lib/strings.he'
+import { DashboardLayout } from '@/components/dashboard-layout'
 import { LoginPage } from '@/features/auth/login-page'
 import { GamesListPage } from '@/features/builder/games-list-page'
+import { GameEditorPage } from '@/features/builder/game-editor-page'
 
 interface Organizer {
   id: string
@@ -60,7 +62,16 @@ const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   {
     element: <RequireAuth />,
-    children: [{ path: '/', element: <GamesListPage /> }],
+    children: [
+      {
+        path: '/',
+        element: <DashboardLayout />,
+        children: [
+          { index: true, element: <GamesListPage /> },
+          { path: 'games/:gameId', element: <GameEditorPage /> },
+        ],
+      },
+    ],
   },
   { path: '*', element: <NotFoundPage /> },
 ])

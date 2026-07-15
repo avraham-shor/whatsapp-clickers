@@ -65,7 +65,8 @@ func run(logger *slog.Logger) error {
 
 	st := store.New(pool)
 	authSvc := auth.NewService(st, cfg.SessionSecret)
-	router := httpapi.NewRouter(st, authSvc, webdist.FS())
+	// st satisfies both Pinger and GameStore.
+	router := httpapi.NewRouter(st, authSvc, st, webdist.FS())
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

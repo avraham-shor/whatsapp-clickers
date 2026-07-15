@@ -22,7 +22,7 @@ type Pinger interface {
 
 // NewRouter builds the full HTTP handler. static holds the built SPA
 // (index.html at its root); nil disables static serving (API-only).
-func NewRouter(db Pinger, authSvc AuthService, static fs.FS) http.Handler {
+func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS) http.Handler {
 	r := chi.NewRouter()
 
 	r.Route("/api", func(api chi.Router) {
@@ -44,6 +44,20 @@ func NewRouter(db Pinger, authSvc AuthService, static fs.FS) http.Handler {
 			protected.Use(RequireOrganizer(authSvc))
 			protected.Post("/auth/logout", handleLogout(authSvc))
 			protected.Get("/auth/me", handleMe())
+
+			protected.Route("/games", func(g chi.Router) {
+				g.Post("/", handleCreateGame(games))
+				g.Get("/", handleListGames(games))
+				g.Route("/{gameID}", func(gr chi.Router) {
+					gr.Get("/", handleGetGame(games))
+					gr.Route("/questions", func(qr chi.Router) {
+						qr.Post("/", handleCreateQuestion(games))
+						qr.Post("/reorder", handleReorderQuestions(games))
+						qr.Put("/{questionID}", handleUpdateQuestion(games))
+						qr.Delete("/{questionID}", handleDeleteQuestion(games))
+					})
+				})
+			})
 		})
 	})
 

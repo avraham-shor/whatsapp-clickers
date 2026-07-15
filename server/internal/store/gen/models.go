@@ -8,11 +8,35 @@ import (
 	"time"
 )
 
+type Game struct {
+	ID          string
+	OrganizerID string
+	Title       string
+	JoinCode    string
+	State       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type Organizer struct {
 	ID           string
 	Username     string
 	PasswordHash string
 	CreatedAt    time.Time
+}
+
+type Question struct {
+	ID               string
+	GameID           string
+	Position         int32
+	Type             string
+	Text             string
+	Options          []string
+	CorrectOption    int32
+	AcceptedAnswers  []string
+	TimeLimitSeconds int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type Session struct {

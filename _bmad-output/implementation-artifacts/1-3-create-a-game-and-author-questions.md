@@ -4,7 +4,7 @@ baseline_commit: 4bb7893
 
 # Story 1.3: Create a Game and Author Questions
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -22,55 +22,55 @@ so that I can prepare my quiz in advance.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Schema + store layer — `games` and `questions` (AC: 1, 2, 3, 4, 5)
-  - [ ] `server/migrations/00003_games_questions.sql` (goose Up/Down — next number after 00002; architecture's illustrative numbering is offset by the 1.1 variance):
+- [x] Task 1: Schema + store layer — `games` and `questions` (AC: 1, 2, 3, 4, 5)
+  - [x] `server/migrations/00003_games_questions.sql` (goose Up/Down — next number after 00002; architecture's illustrative numbering is offset by the 1.1 variance):
     - `games`: `id UUID PK DEFAULT gen_random_uuid()`, `organizer_id UUID NOT NULL REFERENCES organizers(id) ON DELETE CASCADE`, `title TEXT NOT NULL`, `join_code TEXT NOT NULL UNIQUE`, `state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','lobby','question_open','question_closed','revealed','leaderboard','finished'))` — the full canonical enum lands in the CHECK now (identical strings in Go/TS/DB per architecture); the engine that drives transitions arrives in 2.3/3.1 — `created_at`/`updated_at timestamptz NOT NULL DEFAULT now()`; index `idx_games_organizer_id`
     - `questions`: `id UUID PK DEFAULT gen_random_uuid()`, `game_id UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE`, `position INTEGER NOT NULL`, `type TEXT NOT NULL CHECK (type IN ('mcq','free_text'))`, `text TEXT NOT NULL`, `options TEXT[] NOT NULL DEFAULT '{}'`, `correct_option INTEGER NOT NULL DEFAULT 0`, `accepted_answers TEXT[] NOT NULL DEFAULT '{}'`, `time_limit_seconds INTEGER NOT NULL DEFAULT 20 CHECK (time_limit_seconds BETWEEN 5 AND 300)`, `created_at`/`updated_at timestamptz NOT NULL DEFAULT now()`; index `idx_questions_game_id_position (game_id, position)`
     - Type-consistency CHECK on `questions`: `(type = 'mcq' AND cardinality(options) = 4 AND correct_option BETWEEN 1 AND 4 AND cardinality(accepted_answers) = 0) OR (type = 'free_text' AND cardinality(options) = 0 AND correct_option = 0 AND cardinality(accepted_answers) >= 1)` — every column NOT NULL with a neutral default so sqlc models stay pgx-free (see Dev Notes / sqlc constraint); no `UNIQUE (game_id, position)` — reorder rewrites positions transactionally instead of fighting a deferred constraint
-  - [ ] `internal/store/queries/games.sql`: `CreateGame :one` · `ListGamesByOrganizer :many` (LEFT JOIN question count, ORDER BY created_at DESC) · `GetGameForOrganizer :one` (WHERE id = $1 AND organizer_id = $2 — ownership in the query, always)
-  - [ ] `internal/store/queries/questions.sql`: `ListQuestionsByGame :many` (ORDER BY position, created_at) · `CreateQuestion :one` (position = COALESCE(MAX+1) via CTE or separate `NextQuestionPosition :one`) · `UpdateQuestion :one` (sets `updated_at = now()`) · `DeleteQuestion :exec` · `UpdateQuestionPosition :exec` — every question query joins/filters through `games.organizer_id` so a foreign question is unreachable by construction
-  - [ ] `internal/store/games.go` + `internal/store/questions.go`: thin wrappers following `store/auth.go` — translate `pgx.ErrNoRows` → `store.ErrNotFound`; `CreateGame(ctx, organizerID, title)` generates the JOIN Code internally and retries ≤5 times on unique-violation (pgconn error 23505 — store is the only package allowed to know pgx sentinels); `ReorderQuestions(ctx, gameID, organizerID, orderedIDs)` runs in a transaction (`q.WithTx`) and rewrites positions 1..N
-  - [ ] JOIN Code generator in `store` (pure function + unit test, no DB): 6 chars via crypto/rand from charset `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no I/O/0/1 — unambiguous when read aloud across a room), stored uppercase `[ASSUMPTION — PRD says the Organizer "receives" the code, so it is server-generated; COHEN24-style vanity codes in the UX journeys are illustrative only — do NOT build a code editor]`
-  - [ ] Run `sqlc generate`, commit `gen/`; verify `TEXT[]` emits `[]string` (pgx/v5 native) and no pgtype leaks into models
-- [ ] Task 2: HTTP surface — games + questions CRUD (AC: 1, 2, 3, 4, 5)
-  - [ ] `internal/httpapi/errors.go`: the central domain-error → envelope mapper deferred from 1.2 ("arrives with 1.3's richer error surface") — maps `store.ErrNotFound` → 404 (`GAME_NOT_FOUND` / `QUESTION_NOT_FOUND` per resource), validation failures → 400 `VALIDATION_FAILED` (message says which field), non-draft mutation → 409 `GAME_NOT_EDITABLE`, infrastructure → 503 `DB_UNAVAILABLE`; existing `writeError` remains the emitter
-  - [ ] `internal/httpapi/games.go`: `GameStore` interface defined here (grow the 1.2 pattern — handlers depend on small interfaces, `*store.Store` satisfies them; `NewRouter` signature grows, update `cmd/server/main.go`). Handlers: `POST /api/games` `{title}` → 201 game payload incl. `joinCode` · `GET /api/games` → `{"items":[...]}` each with `questionCount` · `GET /api/games/{gameID}` → game payload **including its `questions` array** `[design decision — one fetch renders the whole editor; lists stay `{"items":...}` per architecture]`
-  - [ ] `internal/httpapi/questions.go`: `POST /api/games/{gameID}/questions` → 201 · `PUT /api/games/{gameID}/questions/{questionID}` → 200 · `DELETE /api/games/{gameID}/questions/{questionID}` → 204 · `POST /api/games/{gameID}/questions/reorder` `{"questionIds":[...]}` → 204 (chi action-as-sub-resource style); reorder body must be an exact permutation of the game's question IDs, else 400
-  - [ ] Validation at the boundary (trim first): title 1–120 chars; question text 1–500; MCQ exactly 4 non-empty options ≤200 chars each + `correctOption` 1–4; Free-Text ≥1 accepted answers (≤20 values, each 1–200 chars — mirrors the FR-5 200-char answer cap); `timeLimitSeconds` integer 5–300 `[ASSUMPTION — bounds not fixed in PRD; DB CHECK mirrors them]`; question `type` immutable after creation `[ASSUMPTION]`; `http.MaxBytesReader` 64 KiB on every mutation body (1.2 hardening pattern) → 413 `REQUEST_TOO_LARGE`
-  - [ ] Guardrail: all question/game mutations require `state = 'draft'` → else 409 `GAME_NOT_EDITABLE` (trivially true today — every game is draft — but it future-proofs against 2.3+ live states)
-  - [ ] Router wiring inside the existing `RequireOrganizer` group; every handler binds DB calls with `context.WithTimeout(r.Context(), 5*time.Second)` (established pattern); ownership = `GetGameForOrganizer` with the context organizer — 404 `GAME_NOT_FOUND`, never 403 (existence must not leak, per AC-5)
-  - [ ] slog: INFO on game created (`game_id`, `organizer_id`), question created/updated/deleted (`game_id`, `question_id`); zero new ERROR paths on a healthy run (NFR-8)
-  - [ ] `router_test.go` + handler tests in the existing stub-interface style (`stubPinger` precedent): create game returns unique code; list scoped to the session organizer; foreign game → 404 `GAME_NOT_FOUND` envelope; MCQ with 3 options → 400; free-text with 0 accepted answers → 400; `correctOption` 0/5 → 400; reorder with missing/extra/duplicate IDs → 400; reorder happy path persists order; delete → 204; mutations without session → 401; oversized body → 413; non-draft game mutation → 409. **Regression guard: all 18 existing router/auth tests pass unchanged**
-- [ ] Task 3: Frontend — dashboard shell per UX-DR9 (AC: 5)
-  - [ ] `web/src/components/dashboard-layout.tsx` (documented variance — shared across builder/lobby/live/results later, so it lives above `features/`): right-in-RTL sidebar `aside` 240px (logical start side — RTL puts it right automatically), white Level-1 panel with `host-border` border, brand title, nav link "המשחקים שלי", logout button relocated here from the games-list page (same mutation logic); main region `bg-host-surface` with 24px content padding; render via route layout under `RequireAuth` in `app.tsx`
-  - [ ] Do **NOT** add the shadcn sidebar block (it drags sheet/tooltip/skeleton along) — a 240px `aside` is ~20 lines; builder inputs/dialogs stay shadcn defaults per DESIGN.md's inheritance contract
-  - [ ] Optimized 1280px+, minimum 1024px; below that the supported single-column collapse (sidebar becomes a top bar) — same code path 200% zoom hits (WCAG 1.4.4); all sizes rem; visible focus rings preserved
-  - [ ] `app.tsx` route tree: `RequireAuth` → `DashboardLayout` → `{ index: GamesListPage }`, `{ path: 'games/:gameId', element: GameEditorPage }`; catch-all and login routes untouched
-- [ ] Task 4: Frontend — real games list + create game (AC: 1)
-  - [ ] `web/src/features/builder/games-list-page.tsx`: replace the 1.2 placeholder — `useQuery` on `GET /api/games`; game cards (white, `host-border`, 12px radius, no shadow) showing title, JOIN Code (bidi-isolated), question count, created date; click → navigate to editor; empty state invites creating the first game (copy from `strings.he.ts`, UX-DR12 principles)
-  - [ ] Create-game dialog (shadcn Dialog — modals are the one shadow-allowed surface): title field + submit via `useMutation`; on success invalidate the games query and navigate to `/games/:id`; pending state disables the trigger (architecture rule); errors surfaced via `aria-describedby`, copy from `strings.he.ts`
-- [ ] Task 5: Frontend — game editor page (AC: 1, 2, 3, 4)
-  - [ ] `web/src/features/builder/game-editor-page.tsx`: `useQuery` on `GET /api/games/{gameId}` (single fetch — game + questions); header shows title + JOIN Code prominently (the code is a Latin/digit LTR token inside RTL — wrap in `<bdi>`/`dir="ltr"` span, per DESIGN.md bidi mandate); questions rendered as an ordered list showing type badge, text, time limit, and for MCQ the correct option
-  - [ ] Reorder: per-row up/down buttons (aria-labeled) → optimistic local order + `POST .../questions/reorder`; **no drag-and-drop library** — zero new npm dependencies this story
-  - [ ] Delete question behind a shadcn AlertDialog confirm (destructive action; Escape closes, never opens — UX-DR13 spirit)
-  - [ ] Empty state: a Game with no Questions prompts adding the first question (single CTA — the "או ייבאו חבילה מהמאגר" second CTA arrives with Story 1.5's Question Bank; don't build a disabled stub for it)
-  - [ ] 404/foreign game: `GAME_NOT_FOUND` from the API renders the Hebrew not-found treatment (reuse `strings.notFound` or a builder-specific message) — never a blank screen
-- [ ] Task 6: Frontend — question editor (AC: 2, 3, 4)
-  - [ ] `web/src/features/builder/question-editor.tsx`: one component for create + edit (dialog or inline panel — dev's choice; dialog matches the modal elevation rule); type picked at creation (MCQ / Free-Text) and immutable when editing
-  - [ ] MCQ form: question text (Textarea), exactly four option inputs labeled א/ב/ג/ד **by position** — the letters are presentation, never stored in the option strings (position-as-identity, PRD Glossary) — RadioGroup marks exactly one correct
-  - [ ] Free-Text form: question text + Accepted Answers multi-value editor (add/remove/edit rows, order preserved — **the first Accepted Answer is the primary form shown at Reveal on the stage** (A15); hint text says so); AI never invents correctness — the Organizer's list is the whole truth
-  - [ ] Time limit field on both: numeric, pre-filled 20, with the A8 guidance line ("30–45 שניות מתאימות לקהל רחב יותר" — final copy dev's craft in `strings.he.ts`, principle binding: mention screen-reader/slower-motor accommodation)
-  - [ ] Client-side validation mirrors the server rules (trim, lengths, 4 options, ≥1 accepted answer); errors associated via `aria-describedby`, never floating toasts; submit disabled while pending
-  - [ ] `npx shadcn@latest add dialog alert-dialog textarea radio-group` (Button/Input/Label/Card already present); after adding, re-run the filter-safety greps — 1.1 had to strip a fontsource import that shadcn add reintroduced
-  - [ ] `web/src/lib/types.ts` created (canonical tree location): `GameState` union (7 canonical strings), `Game`, `GameListItem`, `Question` wire types mirroring the Go payloads (camelCase)
-  - [ ] `web/src/lib/strings.he.ts`: all new copy — nav, games list, create dialog, editor, question forms, confirm-delete, validation messages, empty states; **no Hebrew literals in any component** (CI-greppable convention)
-- [ ] Task 7: Deferred-work item — spacing-scale enforcement decision (deferred from 1.1 review to "the first real UI story (1.3)")
-  - [ ] While building Tasks 3–6, use only on-scale spacing stops (4/8/12/16/24/32/48/64px ↔ Tailwind 1/2/3/4/6/8/12/16) in hand-written classes; buttons stay `h-10` (40px) per DESIGN.md, never shadcn's default `h-9`
-  - [ ] Close the item in `deferred-work.md` with the outcome: recommended disposition is "convention + review" (mechanical `--spacing: initial` enforcement stays rejected — it breaks shadcn defaults); record whatever is actually decided
-- [ ] Task 8: Quality gates + end-to-end verification (all ACs)
-  - [ ] All local gates: `gofmt` clean, `go vet ./...`, `go test ./...`, `sqlc generate` (empty diff), `eslint`, `tsc -b --noEmit`, `npm run build`, filter-safety greps
-  - [ ] Manual E2E against local Postgres (Docker, per README): login → create game → JOIN Code visible on list + editor → add MCQ (4 options, correct marked, default 20s shown) → add Free-Text (2 accepted answers) → edit both → reorder via up/down → refresh: order persists (AC-4) → delete a question (confirm dialog) → provision a second organizer, curl their session against the first organizer's game ID → 404 `GAME_NOT_FOUND` envelope (AC-5) → `/games/:id` served by the built binary via SPA fallback → dashboard renders RTL with the 240px sidebar at 1280px and collapses at <1024px → zero ERROR log lines
-  - [ ] Migration check: `00003` applies cleanly on a fresh DB **and** on the existing local dev DB; goose Down works
+  - [x] `internal/store/queries/games.sql`: `CreateGame :one` · `ListGamesByOrganizer :many` (LEFT JOIN question count, ORDER BY created_at DESC) · `GetGameForOrganizer :one` (WHERE id = $1 AND organizer_id = $2 — ownership in the query, always)
+  - [x] `internal/store/queries/questions.sql`: `ListQuestionsByGame :many` (ORDER BY position, created_at) · `CreateQuestion :one` (position = COALESCE(MAX+1) via CTE or separate `NextQuestionPosition :one`) · `UpdateQuestion :one` (sets `updated_at = now()`) · `DeleteQuestion :exec` · `UpdateQuestionPosition :exec` — every question query joins/filters through `games.organizer_id` so a foreign question is unreachable by construction
+  - [x] `internal/store/games.go` + `internal/store/questions.go`: thin wrappers following `store/auth.go` — translate `pgx.ErrNoRows` → `store.ErrNotFound`; `CreateGame(ctx, organizerID, title)` generates the JOIN Code internally and retries ≤5 times on unique-violation (pgconn error 23505 — store is the only package allowed to know pgx sentinels); `ReorderQuestions(ctx, gameID, organizerID, orderedIDs)` runs in a transaction (`q.WithTx`) and rewrites positions 1..N
+  - [x] JOIN Code generator in `store` (pure function + unit test, no DB): 6 chars via crypto/rand from charset `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no I/O/0/1 — unambiguous when read aloud across a room), stored uppercase `[ASSUMPTION — PRD says the Organizer "receives" the code, so it is server-generated; COHEN24-style vanity codes in the UX journeys are illustrative only — do NOT build a code editor]`
+  - [x] Run `sqlc generate`, commit `gen/`; verify `TEXT[]` emits `[]string` (pgx/v5 native) and no pgtype leaks into models
+- [x] Task 2: HTTP surface — games + questions CRUD (AC: 1, 2, 3, 4, 5)
+  - [x] `internal/httpapi/errors.go`: the central domain-error → envelope mapper deferred from 1.2 ("arrives with 1.3's richer error surface") — maps `store.ErrNotFound` → 404 (`GAME_NOT_FOUND` / `QUESTION_NOT_FOUND` per resource), validation failures → 400 `VALIDATION_FAILED` (message says which field), non-draft mutation → 409 `GAME_NOT_EDITABLE`, infrastructure → 503 `DB_UNAVAILABLE`; existing `writeError` remains the emitter
+  - [x] `internal/httpapi/games.go`: `GameStore` interface defined here (grow the 1.2 pattern — handlers depend on small interfaces, `*store.Store` satisfies them; `NewRouter` signature grows, update `cmd/server/main.go`). Handlers: `POST /api/games` `{title}` → 201 game payload incl. `joinCode` · `GET /api/games` → `{"items":[...]}` each with `questionCount` · `GET /api/games/{gameID}` → game payload **including its `questions` array** `[design decision — one fetch renders the whole editor; lists stay `{"items":...}` per architecture]`
+  - [x] `internal/httpapi/questions.go`: `POST /api/games/{gameID}/questions` → 201 · `PUT /api/games/{gameID}/questions/{questionID}` → 200 · `DELETE /api/games/{gameID}/questions/{questionID}` → 204 · `POST /api/games/{gameID}/questions/reorder` `{"questionIds":[...]}` → 204 (chi action-as-sub-resource style); reorder body must be an exact permutation of the game's question IDs, else 400
+  - [x] Validation at the boundary (trim first): title 1–120 chars; question text 1–500; MCQ exactly 4 non-empty options ≤200 chars each + `correctOption` 1–4; Free-Text ≥1 accepted answers (≤20 values, each 1–200 chars — mirrors the FR-5 200-char answer cap); `timeLimitSeconds` integer 5–300 `[ASSUMPTION — bounds not fixed in PRD; DB CHECK mirrors them]`; question `type` immutable after creation `[ASSUMPTION]`; `http.MaxBytesReader` 64 KiB on every mutation body (1.2 hardening pattern) → 413 `REQUEST_TOO_LARGE`
+  - [x] Guardrail: all question/game mutations require `state = 'draft'` → else 409 `GAME_NOT_EDITABLE` (trivially true today — every game is draft — but it future-proofs against 2.3+ live states)
+  - [x] Router wiring inside the existing `RequireOrganizer` group; every handler binds DB calls with `context.WithTimeout(r.Context(), 5*time.Second)` (established pattern); ownership = `GetGameForOrganizer` with the context organizer — 404 `GAME_NOT_FOUND`, never 403 (existence must not leak, per AC-5)
+  - [x] slog: INFO on game created (`game_id`, `organizer_id`), question created/updated/deleted (`game_id`, `question_id`); zero new ERROR paths on a healthy run (NFR-8)
+  - [x] `router_test.go` + handler tests in the existing stub-interface style (`stubPinger` precedent): create game returns unique code; list scoped to the session organizer; foreign game → 404 `GAME_NOT_FOUND` envelope; MCQ with 3 options → 400; free-text with 0 accepted answers → 400; `correctOption` 0/5 → 400; reorder with missing/extra/duplicate IDs → 400; reorder happy path persists order; delete → 204; mutations without session → 401; oversized body → 413; non-draft game mutation → 409. **Regression guard: all 18 existing router/auth tests pass unchanged**
+- [x] Task 3: Frontend — dashboard shell per UX-DR9 (AC: 5)
+  - [x] `web/src/components/dashboard-layout.tsx` (documented variance — shared across builder/lobby/live/results later, so it lives above `features/`): right-in-RTL sidebar `aside` 240px (logical start side — RTL puts it right automatically), white Level-1 panel with `host-border` border, brand title, nav link "המשחקים שלי", logout button relocated here from the games-list page (same mutation logic); main region `bg-host-surface` with 24px content padding; render via route layout under `RequireAuth` in `app.tsx`
+  - [x] Do **NOT** add the shadcn sidebar block (it drags sheet/tooltip/skeleton along) — a 240px `aside` is ~20 lines; builder inputs/dialogs stay shadcn defaults per DESIGN.md's inheritance contract
+  - [x] Optimized 1280px+, minimum 1024px; below that the supported single-column collapse (sidebar becomes a top bar) — same code path 200% zoom hits (WCAG 1.4.4); all sizes rem; visible focus rings preserved
+  - [x] `app.tsx` route tree: `RequireAuth` → `DashboardLayout` → `{ index: GamesListPage }`, `{ path: 'games/:gameId', element: GameEditorPage }`; catch-all and login routes untouched
+- [x] Task 4: Frontend — real games list + create game (AC: 1)
+  - [x] `web/src/features/builder/games-list-page.tsx`: replace the 1.2 placeholder — `useQuery` on `GET /api/games`; game cards (white, `host-border`, 12px radius, no shadow) showing title, JOIN Code (bidi-isolated), question count, created date; click → navigate to editor; empty state invites creating the first game (copy from `strings.he.ts`, UX-DR12 principles)
+  - [x] Create-game dialog (shadcn Dialog — modals are the one shadow-allowed surface): title field + submit via `useMutation`; on success invalidate the games query and navigate to `/games/:id`; pending state disables the trigger (architecture rule); errors surfaced via `aria-describedby`, copy from `strings.he.ts`
+- [x] Task 5: Frontend — game editor page (AC: 1, 2, 3, 4)
+  - [x] `web/src/features/builder/game-editor-page.tsx`: `useQuery` on `GET /api/games/{gameId}` (single fetch — game + questions); header shows title + JOIN Code prominently (the code is a Latin/digit LTR token inside RTL — wrap in `<bdi>`/`dir="ltr"` span, per DESIGN.md bidi mandate); questions rendered as an ordered list showing type badge, text, time limit, and for MCQ the correct option
+  - [x] Reorder: per-row up/down buttons (aria-labeled) → optimistic local order + `POST .../questions/reorder`; **no drag-and-drop library** — zero new npm dependencies this story
+  - [x] Delete question behind a shadcn AlertDialog confirm (destructive action; Escape closes, never opens — UX-DR13 spirit)
+  - [x] Empty state: a Game with no Questions prompts adding the first question (single CTA — the "או ייבאו חבילה מהמאגר" second CTA arrives with Story 1.5's Question Bank; don't build a disabled stub for it)
+  - [x] 404/foreign game: `GAME_NOT_FOUND` from the API renders the Hebrew not-found treatment (reuse `strings.notFound` or a builder-specific message) — never a blank screen
+- [x] Task 6: Frontend — question editor (AC: 2, 3, 4)
+  - [x] `web/src/features/builder/question-editor.tsx`: one component for create + edit (dialog or inline panel — dev's choice; dialog matches the modal elevation rule); type picked at creation (MCQ / Free-Text) and immutable when editing
+  - [x] MCQ form: question text (Textarea), exactly four option inputs labeled א/ב/ג/ד **by position** — the letters are presentation, never stored in the option strings (position-as-identity, PRD Glossary) — RadioGroup marks exactly one correct
+  - [x] Free-Text form: question text + Accepted Answers multi-value editor (add/remove/edit rows, order preserved — **the first Accepted Answer is the primary form shown at Reveal on the stage** (A15); hint text says so); AI never invents correctness — the Organizer's list is the whole truth
+  - [x] Time limit field on both: numeric, pre-filled 20, with the A8 guidance line ("30–45 שניות מתאימות לקהל רחב יותר" — final copy dev's craft in `strings.he.ts`, principle binding: mention screen-reader/slower-motor accommodation)
+  - [x] Client-side validation mirrors the server rules (trim, lengths, 4 options, ≥1 accepted answer); errors associated via `aria-describedby`, never floating toasts; submit disabled while pending
+  - [x] `npx shadcn@latest add dialog alert-dialog textarea radio-group` (Button/Input/Label/Card already present); after adding, re-run the filter-safety greps — 1.1 had to strip a fontsource import that shadcn add reintroduced
+  - [x] `web/src/lib/types.ts` created (canonical tree location): `GameState` union (7 canonical strings), `Game`, `GameListItem`, `Question` wire types mirroring the Go payloads (camelCase)
+  - [x] `web/src/lib/strings.he.ts`: all new copy — nav, games list, create dialog, editor, question forms, confirm-delete, validation messages, empty states; **no Hebrew literals in any component** (CI-greppable convention)
+- [x] Task 7: Deferred-work item — spacing-scale enforcement decision (deferred from 1.1 review to "the first real UI story (1.3)")
+  - [x] While building Tasks 3–6, use only on-scale spacing stops (4/8/12/16/24/32/48/64px ↔ Tailwind 1/2/3/4/6/8/12/16) in hand-written classes; buttons stay `h-10` (40px) per DESIGN.md, never shadcn's default `h-9`
+  - [x] Close the item in `deferred-work.md` with the outcome: recommended disposition is "convention + review" (mechanical `--spacing: initial` enforcement stays rejected — it breaks shadcn defaults); record whatever is actually decided
+- [x] Task 8: Quality gates + end-to-end verification (all ACs)
+  - [x] All local gates: `gofmt` clean, `go vet ./...`, `go test ./...`, `sqlc generate` (empty diff), `eslint`, `tsc -b --noEmit`, `npm run build`, filter-safety greps
+  - [x] Manual E2E against local Postgres (Docker, per README): login → create game → JOIN Code visible on list + editor → add MCQ (4 options, correct marked, default 20s shown) → add Free-Text (2 accepted answers) → edit both → reorder via up/down → refresh: order persists (AC-4) → delete a question (confirm dialog) → provision a second organizer, curl their session against the first organizer's game ID → 404 `GAME_NOT_FOUND` envelope (AC-5) → `/games/:id` served by the built binary via SPA fallback → dashboard renders RTL with the 240px sidebar at 1280px and collapses at <1024px → zero ERROR log lines
+  - [x] Migration check: `00003` applies cleanly on a fresh DB **and** on the existing local dev DB; goose Down works
 
 ## Dev Notes
 
@@ -149,12 +149,68 @@ Go stdlib `testing`, co-located, stub interfaces in-test (existing style). This 
 
 ### Agent Model Used
 
+claude-fable-5 (Claude Fable 5, dev-story workflow)
+
 ### Debug Log References
+
+- Full Go suite green: 46 httpapi tests (21 pre-existing router/auth unchanged in behavior + 25 new games/questions handler tests) + 4 store join-code unit tests; `gofmt`/`go vet` clean; `sqlc generate` idempotent (gen/ committed).
+- Frontend gates green: `eslint`, `tsc -b --noEmit`, `npm run build`; filter-safety greps clean on source **and** built bundle (no fontsource regression after `shadcn add`).
+- API-level E2E (34 checks, real Postgres 17 in Docker + built binary with embedded SPA): login → create game (join code shape/charset, trimmed title, `questions: []`) → list scoped → MCQ create (default 20s, sentinel fields omitted on wire) → free-text create (2 answers) → edit both → type-change attempt → 404 → reorder → order persists after refresh (AC-4) → reorder missing/duplicate/extra IDs → 400 → delete → 204 → re-delete → 404 → second organizer gets 404 `GAME_NOT_FOUND` on foreign game/list leak check (AC-5) → no session → 401 → `/games/:id` served via SPA fallback. Zero ERROR log lines (NFR-8); INFO lifecycle with canonical keys verified.
+- Visual E2E (headless Edge via playwright-core, no new project deps): document `dir=rtl`; sidebar exactly 240px flush to the right at 1280px; collapses to full-width top bar at 900px (<1024px); question dialog pre-fills 20s with the A8 guidance line; JOIN Code renders unscrambled (bidi-isolated); zero console errors. Screenshots reviewed.
+- Migration check: `00003` applied on the existing dev DB at boot (count 1) and on a fresh DB (count 3); `goose down` removes both tables cleanly and re-`up` succeeds; CHECK constraints and indexes verified via `\d` on the fresh DB.
 
 ### Completion Notes List
 
+- Builder vertical slice complete: `games`+`questions` schema, ownership-scoped CRUD, server-generated JOIN Codes (32-char unambiguous charset, uniform sampling, ≤5 collision retries on 23505 inside `store`), UX-DR9 dashboard shell, real games list + create dialog, game editor with up/down reorder + confirm-delete, MCQ/free-text question editor with A8 time-limit guidance.
+- Documented deviations from the story's letter (all within its intent):
+  - `DeleteQuestion` / `UpdateQuestionPosition` are `:execrows` (not `:exec`) — 0 rows affected is how a missing/foreign question becomes `store.ErrNotFound` → 404 `QUESTION_NOT_FOUND`.
+  - `UpdateQuestion` carries `type` in the WHERE clause as the immutability key; a type-change attempt matches no row and surfaces as 404 `QUESTION_NOT_FOUND` (verified E2E). The UI never sends a changed type (type is fixed after creation).
+  - The reorder exact-permutation check runs transactionally inside `store.ReorderQuestions` (`ErrReorderMismatch` → 400 `VALIDATION_FAILED`) — the HTTP boundary cannot know the current ID set race-free; the boundary still rejects malformed UUIDs before any DB call.
+  - `POST /api/games` returns the same detail shape as GET (with `questions: []`) so the client can seed the editor cache.
+  - One extra INFO log line (`questions reordered`, `game_id`) beyond the story's list.
+  - Malformed UUID path/body params short-circuit to their domain 404/400 instead of leaking a Postgres 22P02 parse error as 503.
+- Boundary validation trims first and counts runes (Hebrew-safe): title 1–120, text 1–500, MCQ exactly 4 options ≤200 + `correctOption` 1–4 (+ `acceptedAnswers` must be absent), free-text 1–20 answers ≤200 (+ `options`/`correctOption` must be absent), `timeLimitSeconds` 5–300 defaulting to 20; 64 KiB `MaxBytesReader` on every mutation → 413.
+- Frontend: zero new npm dependencies (shadcn adds pull from the existing radix-ui umbrella; lucide-react icons already a dependency); all Hebrew via `strings.he.ts`; wire types in `lib/types.ts` with the 7-string `GameState` union verbatim; reorder is optimistic with rollback on failure; empty states carry a single next-action CTA.
+- Task 7 closed in `deferred-work.md`: disposition "convention + review" — on-scale spacing stops in hand-written classes, buttons `h-10`, mechanical `--spacing: initial` enforcement stays rejected.
+
 ### File List
+
+New:
+- server/migrations/00003_games_questions.sql
+- server/internal/store/queries/games.sql
+- server/internal/store/queries/questions.sql
+- server/internal/store/gen/games.sql.go (generated)
+- server/internal/store/gen/questions.sql.go (generated)
+- server/internal/store/games.go
+- server/internal/store/games_test.go
+- server/internal/store/questions.go
+- server/internal/httpapi/errors.go
+- server/internal/httpapi/games.go
+- server/internal/httpapi/games_test.go
+- server/internal/httpapi/questions.go
+- server/internal/httpapi/questions_test.go
+- web/src/components/dashboard-layout.tsx
+- web/src/components/ui/dialog.tsx (shadcn)
+- web/src/components/ui/alert-dialog.tsx (shadcn)
+- web/src/components/ui/radio-group.tsx (shadcn)
+- web/src/components/ui/textarea.tsx (shadcn)
+- web/src/features/builder/game-editor-page.tsx
+- web/src/features/builder/question-editor.tsx
+- web/src/lib/types.ts
+
+Modified:
+- server/internal/store/gen/models.go (generated)
+- server/internal/httpapi/router.go
+- server/internal/httpapi/router_test.go
+- server/cmd/server/main.go
+- web/src/app.tsx
+- web/src/features/builder/games-list-page.tsx
+- web/src/lib/strings.he.ts
+- _bmad-output/implementation-artifacts/deferred-work.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/1-3-create-a-game-and-author-questions.md
 
 ## Change Log
 
 - 2026-07-15: Story created by create-story workflow — ultimate context engine analysis completed (epics, PRD, architecture, UX spine, DESIGN tokens, 1.2 story intelligence, live codebase read: router/middleware/auth handlers/store/sqlc.yaml/migrations/app.tsx/api.ts/strings/index.css). Status: ready-for-dev.
+- 2026-07-15: Story implemented by dev-story workflow (claude-fable-5) — all 8 tasks complete: games/questions schema + store layer, HTTP CRUD surface with central error mapper, dashboard shell, games list + create dialog, game editor, question editor, spacing-scale deferred item closed, full quality gates + API/visual E2E against local Postgres. Status: review.
