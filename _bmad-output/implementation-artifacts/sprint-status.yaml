@@ -45,7 +45,7 @@ development_status:
   # Epic 1: Foundation & Game Authoring
   epic-1: in-progress
   1-1-project-scaffold-ci-and-deployed-walking-skeleton: done
-  1-2-organizer-sign-in: review
+  1-2-organizer-sign-in: done
   1-3-create-a-game-and-author-questions: backlog
   1-4-configure-scoring-rules: backlog
   1-5-question-bank-package-import: backlog
