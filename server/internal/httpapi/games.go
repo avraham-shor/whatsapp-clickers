@@ -26,6 +26,8 @@ type GameStore interface {
 	DeleteQuestion(ctx context.Context, questionID, gameID, organizerID string) error
 	ReorderQuestions(ctx context.Context, gameID, organizerID string, orderedIDs []string) error
 	UpdateGameScoring(ctx context.Context, arg store.UpdateGameScoringParams) (gen.Game, error)
+	ListQuestionPackages(ctx context.Context) ([]gen.ListQuestionPackagesRow, error)
+	ImportPackageQuestions(ctx context.Context, gameID, organizerID, packageID string) ([]gen.Question, error)
 }
 
 // gameStateDraft is the only state in which a game's content is editable.

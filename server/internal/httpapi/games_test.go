@@ -33,6 +33,10 @@ type stubGames struct {
 	deleteErr   error
 	reorderErr  error
 	scoringErr  error
+	packages    []gen.ListQuestionPackagesRow
+	packagesErr error
+	importedQs  []gen.Question
+	importErr   error
 
 	createdTitles  []string
 	listedFor      []string
@@ -42,6 +46,7 @@ type stubGames struct {
 	deletedQs      [][3]string
 	reorders       [][]string
 	scoringUpdates []store.UpdateGameScoringParams
+	imports        [][3]string
 }
 
 func (s *stubGames) CreateGame(ctx context.Context, organizerID, title string) (gen.Game, error) {
@@ -95,6 +100,15 @@ func (s *stubGames) UpdateGameScoring(ctx context.Context, arg store.UpdateGameS
 	game.SpeedBonusSecond = arg.SpeedBonusSecond
 	game.SpeedBonusThird = arg.SpeedBonusThird
 	return game, nil
+}
+
+func (s *stubGames) ListQuestionPackages(ctx context.Context) ([]gen.ListQuestionPackagesRow, error) {
+	return s.packages, s.packagesErr
+}
+
+func (s *stubGames) ImportPackageQuestions(ctx context.Context, gameID, organizerID, packageID string) ([]gen.Question, error) {
+	s.imports = append(s.imports, [3]string{gameID, organizerID, packageID})
+	return s.importedQs, s.importErr
 }
 
 // noGames is the GameStore for tests that never touch game routes.

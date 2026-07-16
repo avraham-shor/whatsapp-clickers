@@ -25,6 +25,8 @@ export interface Question {
   /** Present on free_text only: the first entry is the primary form shown at Reveal. */
   acceptedAnswers?: string[]
   timeLimitSeconds: number
+  /** Provenance marker: true when the question was copied from the Question Bank. */
+  importedFromBank: boolean
   createdAt: string
   updatedAt: string
 }
@@ -50,4 +52,16 @@ export interface Game extends GameListItem {
 
 export interface GameList {
   items: GameListItem[]
+}
+
+/** A Question Bank package card: title, count, and a first-question preview (A13). */
+export interface QuestionPackage {
+  id: string
+  title: string
+  questionCount: number
+  preview: string
+}
+
+export interface QuestionPackageList {
+  items: QuestionPackage[]
 }

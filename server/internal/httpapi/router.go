@@ -45,6 +45,10 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS) ht
 			protected.Post("/auth/logout", handleLogout(authSvc))
 			protected.Get("/auth/me", handleMe())
 
+			// The Question Bank is first-party and identical for every
+			// organizer — open with the session guard, no ownership scoping.
+			protected.Get("/question-packages", handleListQuestionPackages(games))
+
 			protected.Route("/games", func(g chi.Router) {
 				g.Post("/", handleCreateGame(games))
 				g.Get("/", handleListGames(games))
@@ -54,6 +58,7 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS) ht
 					gr.Route("/questions", func(qr chi.Router) {
 						qr.Post("/", handleCreateQuestion(games))
 						qr.Post("/reorder", handleReorderQuestions(games))
+						qr.Post("/import-package", handleImportPackage(games))
 						qr.Put("/{questionID}", handleUpdateQuestion(games))
 						qr.Delete("/{questionID}", handleDeleteQuestion(games))
 					})

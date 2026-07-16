@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { PackageImportDialog } from '@/features/builder/package-import-dialog'
 import { QuestionEditor } from '@/features/builder/question-editor'
 import { ScoringEditor } from '@/features/builder/scoring-editor'
 
@@ -30,6 +31,7 @@ export function GameEditorPage() {
   const { gameId = '' } = useParams()
   const queryClient = useQueryClient()
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' })
+  const [importOpen, setImportOpen] = useState(false)
 
   const game = useQuery({
     queryKey: ['games', gameId],
@@ -117,12 +119,21 @@ export function GameEditorPage() {
             </bdi>
           </p>
         </div>
-        <Button
-          onClick={() => setEditor({ mode: 'create' })}
-          className="h-10 bg-green-800 text-ink-on-dark hover:bg-green-900"
-        >
-          {strings.gameEditor.addQuestion}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="h-10 border-host-border text-host-text"
+            onClick={() => setImportOpen(true)}
+          >
+            {strings.questionBank.openDialog}
+          </Button>
+          <Button
+            onClick={() => setEditor({ mode: 'create' })}
+            className="h-10 bg-green-800 text-ink-on-dark hover:bg-green-900"
+          >
+            {strings.gameEditor.addQuestion}
+          </Button>
+        </div>
       </header>
 
       {reorder.isError && (
@@ -132,11 +143,28 @@ export function GameEditorPage() {
       )}
 
       {questions.length === 0 ? (
+        // Empty states carry a next action (EXPERIENCE.md): both CTAs are
+        // real actions — author the first question or import a bank package.
         <div className="flex flex-col items-start gap-2 rounded-md border border-host-border bg-surface-raised p-6">
           <p className="text-host-text">{strings.gameEditor.emptyStateTitle}</p>
           <p className="text-host-text-secondary">
             {strings.gameEditor.emptyStateBody}
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => setEditor({ mode: 'create' })}
+              className="h-10 bg-green-800 text-ink-on-dark hover:bg-green-900"
+            >
+              {strings.gameEditor.emptyStateAddCta}
+            </Button>
+            <Button
+              variant="outline"
+              className="h-10 border-host-border text-host-text"
+              onClick={() => setImportOpen(true)}
+            >
+              {strings.gameEditor.emptyStateImportCta}
+            </Button>
+          </div>
         </div>
       ) : (
         <ol className="flex flex-col gap-4">
@@ -166,6 +194,13 @@ export function GameEditorPage() {
           gameId={gameId}
           question={editor.mode === 'edit' ? editor.question : undefined}
           onClose={() => setEditor({ mode: 'closed' })}
+        />
+      )}
+
+      {importOpen && (
+        <PackageImportDialog
+          gameId={gameId}
+          onClose={() => setImportOpen(false)}
         />
       )}
     </div>
@@ -220,6 +255,12 @@ function QuestionRow({
             <span className="rounded-sm border border-host-border px-2 py-1 text-host-text-secondary">
               {typeLabel}
             </span>
+            {question.importedFromBank && (
+              // Quiet provenance pill (informational, not semantic-colored).
+              <span className="rounded-sm border border-host-border px-2 py-1 text-host-text-secondary">
+                {strings.questionBank.importedBadge}
+              </span>
+            )}
             <span className="text-host-text-secondary">
               {strings.gameEditor.timeLimitSeconds(question.timeLimitSeconds)}
             </span>

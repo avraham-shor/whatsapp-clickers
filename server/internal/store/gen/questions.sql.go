@@ -16,7 +16,7 @@ SELECT g.id,
        $1, $2, $3, $4, $5, $6
 FROM games g
 WHERE g.id = $7 AND g.organizer_id = $8
-RETURNING id, game_id, position, type, text, options, correct_option, accepted_answers, time_limit_seconds, created_at, updated_at
+RETURNING id, game_id, position, type, text, options, correct_option, accepted_answers, time_limit_seconds, created_at, updated_at, imported_from_bank
 `
 
 type CreateQuestionParams struct {
@@ -56,6 +56,7 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		&i.TimeLimitSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ImportedFromBank,
 	)
 	return i, err
 }
@@ -85,7 +86,7 @@ func (q *Queries) DeleteQuestion(ctx context.Context, arg DeleteQuestionParams) 
 
 const listQuestionsByGame = `-- name: ListQuestionsByGame :many
 
-SELECT q.id, q.game_id, q.position, q.type, q.text, q.options, q.correct_option, q.accepted_answers, q.time_limit_seconds, q.created_at, q.updated_at FROM questions q
+SELECT q.id, q.game_id, q.position, q.type, q.text, q.options, q.correct_option, q.accepted_answers, q.time_limit_seconds, q.created_at, q.updated_at, q.imported_from_bank FROM questions q
 JOIN games g ON g.id = q.game_id
 WHERE q.game_id = $1 AND g.organizer_id = $2
 ORDER BY q.position, q.created_at
@@ -119,6 +120,7 @@ func (q *Queries) ListQuestionsByGame(ctx context.Context, arg ListQuestionsByGa
 			&i.TimeLimitSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ImportedFromBank,
 		); err != nil {
 			return nil, err
 		}
@@ -144,7 +146,7 @@ WHERE q.id = $6
   AND q.type = $8
   AND g.id = q.game_id
   AND g.organizer_id = $9
-RETURNING q.id, q.game_id, q.position, q.type, q.text, q.options, q.correct_option, q.accepted_answers, q.time_limit_seconds, q.created_at, q.updated_at
+RETURNING q.id, q.game_id, q.position, q.type, q.text, q.options, q.correct_option, q.accepted_answers, q.time_limit_seconds, q.created_at, q.updated_at, q.imported_from_bank
 `
 
 type UpdateQuestionParams struct {
@@ -186,6 +188,7 @@ func (q *Queries) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) 
 		&i.TimeLimitSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ImportedFromBank,
 	)
 	return i, err
 }

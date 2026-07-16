@@ -34,14 +34,17 @@ const (
 // questionPayload is the wire shape of a question. Fields irrelevant to the
 // type are omitted — the DB sentinels ('{}', 0) never reach the wire.
 type questionPayload struct {
-	ID               string    `json:"id"`
-	Position         int32     `json:"position"`
-	Type             string    `json:"type"`
-	Text             string    `json:"text"`
-	Options          []string  `json:"options,omitempty"`
-	CorrectOption    int32     `json:"correctOption,omitempty"`
-	AcceptedAnswers  []string  `json:"acceptedAnswers,omitempty"`
-	TimeLimitSeconds int32     `json:"timeLimitSeconds"`
+	ID               string   `json:"id"`
+	Position         int32    `json:"position"`
+	Type             string   `json:"type"`
+	Text             string   `json:"text"`
+	Options          []string `json:"options,omitempty"`
+	CorrectOption    int32    `json:"correctOption,omitempty"`
+	AcceptedAnswers  []string `json:"acceptedAnswers,omitempty"`
+	TimeLimitSeconds int32    `json:"timeLimitSeconds"`
+	// No omitempty: always on the wire so the TS type keeps a non-optional
+	// boolean (provenance badge marker, false for custom questions).
+	ImportedFromBank bool      `json:"importedFromBank"`
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
 }
@@ -56,6 +59,7 @@ func newQuestionPayload(question gen.Question) questionPayload {
 		CorrectOption:    question.CorrectOption,
 		AcceptedAnswers:  question.AcceptedAnswers,
 		TimeLimitSeconds: question.TimeLimitSeconds,
+		ImportedFromBank: question.ImportedFromBank,
 		CreatedAt:        question.CreatedAt.UTC(),
 		UpdatedAt:        question.UpdatedAt.UTC(),
 	}

@@ -29,6 +29,20 @@ type Organizer struct {
 	CreatedAt    time.Time
 }
 
+type PackageQuestion struct {
+	ID               string
+	PackageID        string
+	Position         int32
+	Type             string
+	Text             string
+	Options          []string
+	CorrectOption    int32
+	AcceptedAnswers  []string
+	TimeLimitSeconds int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type Question struct {
 	ID               string
 	GameID           string
@@ -41,6 +55,14 @@ type Question struct {
 	TimeLimitSeconds int32
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	ImportedFromBank bool
+}
+
+type QuestionPackage struct {
+	ID        string
+	Title     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Session struct {
