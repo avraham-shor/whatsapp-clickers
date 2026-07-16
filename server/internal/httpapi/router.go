@@ -50,6 +50,7 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS) ht
 				g.Get("/", handleListGames(games))
 				g.Route("/{gameID}", func(gr chi.Router) {
 					gr.Get("/", handleGetGame(games))
+					gr.Put("/scoring", handleUpdateScoring(games))
 					gr.Route("/questions", func(qr chi.Router) {
 						qr.Post("/", handleCreateQuestion(games))
 						qr.Post("/reorder", handleReorderQuestions(games))

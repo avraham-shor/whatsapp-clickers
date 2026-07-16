@@ -64,6 +64,20 @@ export const strings = {
     notFound: 'המשחק הזה לא נמצא. ייתכן שהקישור שגוי או שהמשחק הוסר.',
     backToGames: 'חזרה למשחקים שלי',
   },
+  scoring: {
+    title: 'הגדרות ניקוד',
+    pointsPerCorrectLabel: 'נקודות לתשובה נכונה',
+    bonusLegend: 'בונוס מהירות',
+    bonusHint:
+      'בונוס המהירות ניתן לשלושת העונים הנכונים המהירים ביותר. ערך 0 מבטל את הבונוס.',
+    bonusFirstLabel: 'מקום ראשון',
+    bonusSecondLabel: 'מקום שני',
+    bonusThirdLabel: 'מקום שלישי',
+    save: 'שמירת הניקוד',
+    saved: 'נשמר ✓',
+    validation: 'הזינו מספרים שלמים בין 0 ל־10,000 בכל השדות.',
+    errorServer: 'שמירת הגדרות הניקוד נכשלה. נסו שוב בעוד רגע.',
+  },
   questionEditor: {
     createTitle: 'שאלה חדשה',
     editTitle: 'עריכת שאלה',

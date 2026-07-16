@@ -25,6 +25,7 @@ type GameStore interface {
 	UpdateQuestion(ctx context.Context, arg store.UpdateQuestionParams) (gen.Question, error)
 	DeleteQuestion(ctx context.Context, questionID, gameID, organizerID string) error
 	ReorderQuestions(ctx context.Context, gameID, organizerID string, orderedIDs []string) error
+	UpdateGameScoring(ctx context.Context, arg store.UpdateGameScoringParams) (gen.Game, error)
 }
 
 // gameStateDraft is the only state in which a game's content is editable.
@@ -33,15 +34,28 @@ const gameStateDraft = "draft"
 // maxTitleRunes bounds the game title (runes, not bytes — titles are Hebrew).
 const maxTitleRunes = 120
 
+// Scoring bounds: 0 is meaningful (a zero bonus is disabled, per AC); the cap
+// mirrors the DB CHECK and keeps cumulative int32 scores safe.
+const (
+	minScoringValue = 0
+	maxScoringValue = 10000
+)
+
 // gamePayload is the wire shape of a game (camelCase, direct payload).
+// Scoring fields carry no omitempty: 0 is a meaningful value (a disabled
+// bonus) and must serialize.
 type gamePayload struct {
-	ID            string    `json:"id"`
-	Title         string    `json:"title"`
-	JoinCode      string    `json:"joinCode"`
-	State         string    `json:"state"`
-	QuestionCount int64     `json:"questionCount"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID               string    `json:"id"`
+	Title            string    `json:"title"`
+	JoinCode         string    `json:"joinCode"`
+	State            string    `json:"state"`
+	QuestionCount    int64     `json:"questionCount"`
+	PointsPerCorrect int32     `json:"pointsPerCorrect"`
+	SpeedBonusFirst  int32     `json:"speedBonusFirst"`
+	SpeedBonusSecond int32     `json:"speedBonusSecond"`
+	SpeedBonusThird  int32     `json:"speedBonusThird"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 // gameDetailPayload embeds the questions so one fetch renders the whole
@@ -53,13 +67,17 @@ type gameDetailPayload struct {
 
 func newGamePayload(game gen.Game, questionCount int64) gamePayload {
 	return gamePayload{
-		ID:            game.ID,
-		Title:         game.Title,
-		JoinCode:      game.JoinCode,
-		State:         game.State,
-		QuestionCount: questionCount,
-		CreatedAt:     game.CreatedAt.UTC(),
-		UpdatedAt:     game.UpdatedAt.UTC(),
+		ID:               game.ID,
+		Title:            game.Title,
+		JoinCode:         game.JoinCode,
+		State:            game.State,
+		QuestionCount:    questionCount,
+		PointsPerCorrect: game.PointsPerCorrect,
+		SpeedBonusFirst:  game.SpeedBonusFirst,
+		SpeedBonusSecond: game.SpeedBonusSecond,
+		SpeedBonusThird:  game.SpeedBonusThird,
+		CreatedAt:        game.CreatedAt.UTC(),
+		UpdatedAt:        game.UpdatedAt.UTC(),
 	}
 }
 
@@ -161,13 +179,17 @@ func handleListGames(games GameStore) http.HandlerFunc {
 		items := make([]gamePayload, 0, len(rows))
 		for _, row := range rows {
 			items = append(items, newGamePayload(gen.Game{
-				ID:          row.ID,
-				OrganizerID: row.OrganizerID,
-				Title:       row.Title,
-				JoinCode:    row.JoinCode,
-				State:       row.State,
-				CreatedAt:   row.CreatedAt,
-				UpdatedAt:   row.UpdatedAt,
+				ID:               row.ID,
+				OrganizerID:      row.OrganizerID,
+				Title:            row.Title,
+				JoinCode:         row.JoinCode,
+				State:            row.State,
+				PointsPerCorrect: row.PointsPerCorrect,
+				SpeedBonusFirst:  row.SpeedBonusFirst,
+				SpeedBonusSecond: row.SpeedBonusSecond,
+				SpeedBonusThird:  row.SpeedBonusThird,
+				CreatedAt:        row.CreatedAt,
+				UpdatedAt:        row.UpdatedAt,
 			}, row.QuestionCount))
 		}
 		writeJSON(w, http.StatusOK, listResponse{Items: items})
@@ -197,5 +219,84 @@ func handleGetGame(games GameStore) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, newGameDetailPayload(game, questions))
+	}
+}
+
+// scoringPayload is the direct payload of the scoring sub-resource — PUT
+// returns what was stored. No omitempty: 0 means a disabled bonus.
+type scoringPayload struct {
+	PointsPerCorrect int32 `json:"pointsPerCorrect"`
+	SpeedBonusFirst  int32 `json:"speedBonusFirst"`
+	SpeedBonusSecond int32 `json:"speedBonusSecond"`
+	SpeedBonusThird  int32 `json:"speedBonusThird"`
+}
+
+func handleUpdateScoring(games GameStore) http.HandlerFunc {
+	// All four fields are pointers and required: with plain int32 an omitted
+	// field silently decodes to 0, and 0 is meaningful (zero disables a
+	// bonus) — absence must be an explicit 400, never an accidental zero.
+	type scoringRequest struct {
+		PointsPerCorrect *int32 `json:"pointsPerCorrect"`
+		SpeedBonusFirst  *int32 `json:"speedBonusFirst"`
+		SpeedBonusSecond *int32 `json:"speedBonusSecond"`
+		SpeedBonusThird  *int32 `json:"speedBonusThird"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		organizerID, ok := requireOrganizer(w, r)
+		if !ok {
+			return
+		}
+		gameID, ok := gameIDParam(w, r)
+		if !ok {
+			return
+		}
+		var req scoringRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		// Draft/ownership before body validation (handleUpdateQuestion order):
+		// a foreign or non-draft game answers 404/409 regardless of body.
+		if _, ok := requireDraftGame(ctx, w, games, gameID, organizerID); !ok {
+			return
+		}
+		for _, field := range []struct {
+			name  string
+			value *int32
+		}{
+			{"pointsPerCorrect", req.PointsPerCorrect},
+			{"speedBonusFirst", req.SpeedBonusFirst},
+			{"speedBonusSecond", req.SpeedBonusSecond},
+			{"speedBonusThird", req.SpeedBonusThird},
+		} {
+			if field.value == nil {
+				writeValidationError(w, field.name+" is required")
+				return
+			}
+			if *field.value < minScoringValue || *field.value > maxScoringValue {
+				writeValidationError(w, field.name+" must be between 0 and 10000")
+				return
+			}
+		}
+		game, err := games.UpdateGameScoring(ctx, store.UpdateGameScoringParams{
+			GameID:           gameID,
+			OrganizerID:      organizerID,
+			PointsPerCorrect: *req.PointsPerCorrect,
+			SpeedBonusFirst:  *req.SpeedBonusFirst,
+			SpeedBonusSecond: *req.SpeedBonusSecond,
+			SpeedBonusThird:  *req.SpeedBonusThird,
+		})
+		if err != nil {
+			writeStoreError(w, err, "GAME_NOT_FOUND")
+			return
+		}
+		slog.Info("game scoring updated", "game_id", gameID, "organizer_id", organizerID)
+		writeJSON(w, http.StatusOK, scoringPayload{
+			PointsPerCorrect: game.PointsPerCorrect,
+			SpeedBonusFirst:  game.SpeedBonusFirst,
+			SpeedBonusSecond: game.SpeedBonusSecond,
+			SpeedBonusThird:  game.SpeedBonusThird,
+		})
 	}
 }

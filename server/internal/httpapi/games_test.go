@@ -32,14 +32,16 @@ type stubGames struct {
 	questionErr error
 	deleteErr   error
 	reorderErr  error
+	scoringErr  error
 
-	createdTitles []string
-	listedFor     []string
-	gotGame       [][2]string
-	createdQs     []store.CreateQuestionParams
-	updatedQs     []store.UpdateQuestionParams
-	deletedQs     [][3]string
-	reorders      [][]string
+	createdTitles  []string
+	listedFor      []string
+	gotGame        [][2]string
+	createdQs      []store.CreateQuestionParams
+	updatedQs      []store.UpdateQuestionParams
+	deletedQs      [][3]string
+	reorders       [][]string
+	scoringUpdates []store.UpdateGameScoringParams
 }
 
 func (s *stubGames) CreateGame(ctx context.Context, organizerID, title string) (gen.Game, error) {
@@ -81,22 +83,44 @@ func (s *stubGames) ReorderQuestions(ctx context.Context, gameID, organizerID st
 	return s.reorderErr
 }
 
+func (s *stubGames) UpdateGameScoring(ctx context.Context, arg store.UpdateGameScoringParams) (gen.Game, error) {
+	s.scoringUpdates = append(s.scoringUpdates, arg)
+	if s.scoringErr != nil {
+		return gen.Game{}, s.scoringErr
+	}
+	// Mirror the DB: return the stored game with the new scoring applied.
+	game := s.game
+	game.PointsPerCorrect = arg.PointsPerCorrect
+	game.SpeedBonusFirst = arg.SpeedBonusFirst
+	game.SpeedBonusSecond = arg.SpeedBonusSecond
+	game.SpeedBonusThird = arg.SpeedBonusThird
+	return game, nil
+}
+
 // noGames is the GameStore for tests that never touch game routes.
 func noGames() *stubGames { return &stubGames{} }
 
 // draftGame returns a stub seeded with an owned draft game, the common
-// starting state for mutation tests.
+// starting state for mutation tests. Scoring carries the schema defaults.
 func draftGame() *stubGames {
 	return &stubGames{game: gen.Game{
-		ID:          testGameID,
-		OrganizerID: "org-1",
-		Title:       "ערב טריוויה",
-		JoinCode:    "AB2CD3",
-		State:       "draft",
-		CreatedAt:   time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC),
-		UpdatedAt:   time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC),
+		ID:               testGameID,
+		OrganizerID:      "org-1",
+		Title:            "ערב טריוויה",
+		JoinCode:         "AB2CD3",
+		State:            "draft",
+		PointsPerCorrect: 100,
+		SpeedBonusFirst:  50,
+		SpeedBonusSecond: 30,
+		SpeedBonusThird:  20,
+		CreatedAt:        time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC),
+		UpdatedAt:        time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC),
 	}}
 }
+
+// validScoringBody is a well-formed full-replacement scoring request; tests
+// that probe one field start from here.
+const validScoringBody = `{"pointsPerCorrect":200,"speedBonusFirst":100,"speedBonusSecond":40,"speedBonusThird":0}`
 
 // gamesRouter builds a router with an authenticated org-1 session.
 func gamesRouter(games GameStore) http.Handler {
@@ -298,6 +322,7 @@ func TestGameMutationsWithoutSessionReturn401(t *testing.T) {
 		"create question": httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+"/questions", strings.NewReader(`{}`)),
 		"delete question": httptest.NewRequest(http.MethodDelete, "/api/games/"+testGameID+"/questions/"+testQuestionID, nil),
 		"reorder":         httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+"/questions/reorder", strings.NewReader(`{}`)),
+		"update scoring":  httptest.NewRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", strings.NewReader(validScoringBody)),
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -331,5 +356,237 @@ func TestCreateGameStoreFailureReturns503(t *testing.T) {
 	}
 	if code := decodeErrorCode(t, rec.Body.Bytes()); code != "DB_UNAVAILABLE" {
 		t.Errorf("error code = %q, want DB_UNAVAILABLE", code)
+	}
+}
+
+func TestUpdateScoringPersistsAndEchoes(t *testing.T) {
+	games := draftGame()
+	rec := httptest.NewRecorder()
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", validScoringBody))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /scoring = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	var body struct {
+		PointsPerCorrect *int `json:"pointsPerCorrect"`
+		SpeedBonusFirst  *int `json:"speedBonusFirst"`
+		SpeedBonusSecond *int `json:"speedBonusSecond"`
+		SpeedBonusThird  *int `json:"speedBonusThird"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("scoring response is not valid JSON: %v", err)
+	}
+	// speedBonusThird is 0 and must still be present on the wire (a disabled
+	// bonus is a value, not an omission) — hence pointer targets.
+	if body.PointsPerCorrect == nil || *body.PointsPerCorrect != 200 ||
+		body.SpeedBonusFirst == nil || *body.SpeedBonusFirst != 100 ||
+		body.SpeedBonusSecond == nil || *body.SpeedBonusSecond != 40 ||
+		body.SpeedBonusThird == nil || *body.SpeedBonusThird != 0 {
+		t.Errorf("scoring echo = %s, want 200/100/40/0 with all fields present", rec.Body)
+	}
+	if len(games.scoringUpdates) != 1 {
+		t.Fatalf("store received %d scoring updates, want 1", len(games.scoringUpdates))
+	}
+	got := games.scoringUpdates[0]
+	if got.GameID != testGameID || got.OrganizerID != "org-1" ||
+		got.PointsPerCorrect != 200 || got.SpeedBonusFirst != 100 ||
+		got.SpeedBonusSecond != 40 || got.SpeedBonusThird != 0 {
+		t.Errorf("store params = %+v, want the validated request values scoped to org-1", got)
+	}
+}
+
+func TestUpdateScoringValidation(t *testing.T) {
+	for name, body := range map[string]string{
+		"negative points":       `{"pointsPerCorrect":-1,"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":20}`,
+		"negative bonus":        `{"pointsPerCorrect":100,"speedBonusFirst":50,"speedBonusSecond":-5,"speedBonusThird":20}`,
+		"points over cap":       `{"pointsPerCorrect":10001,"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":20}`,
+		"bonus over cap":        `{"pointsPerCorrect":100,"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":10001}`,
+		"missing points":        `{"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":20}`,
+		"missing first bonus":   `{"pointsPerCorrect":100,"speedBonusSecond":30,"speedBonusThird":20}`,
+		"missing second bonus":  `{"pointsPerCorrect":100,"speedBonusFirst":50,"speedBonusThird":20}`,
+		"missing third bonus":   `{"pointsPerCorrect":100,"speedBonusFirst":50,"speedBonusSecond":30}`,
+		"null field (explicit)": `{"pointsPerCorrect":null,"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":20}`,
+	} {
+		games := draftGame()
+		rec := httptest.NewRecorder()
+		gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", body))
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: PUT /scoring = %d, want 400", name, rec.Code)
+			continue
+		}
+		if code := decodeErrorCode(t, rec.Body.Bytes()); code != "VALIDATION_FAILED" {
+			t.Errorf("%s: error code = %q, want VALIDATION_FAILED", name, code)
+		}
+		if len(games.scoringUpdates) != 0 {
+			t.Errorf("%s: invalid scoring reached the store", name)
+		}
+	}
+}
+
+func TestUpdateScoringBoundaryValuesAccepted(t *testing.T) {
+	// 0 disables a bonus (and is legal for points); 10000 is the cap.
+	games := draftGame()
+	rec := httptest.NewRecorder()
+	body := `{"pointsPerCorrect":0,"speedBonusFirst":10000,"speedBonusSecond":0,"speedBonusThird":10000}`
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("boundary scoring values = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+}
+
+func TestUpdateScoringNonIntegerReturns400(t *testing.T) {
+	// 1.5 fails the int32 decode — INVALID_REQUEST, not VALIDATION_FAILED.
+	games := draftGame()
+	rec := httptest.NewRecorder()
+	body := `{"pointsPerCorrect":1.5,"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":20}`
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", body))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("non-integer scoring = %d, want 400", rec.Code)
+	}
+	if code := decodeErrorCode(t, rec.Body.Bytes()); code != "INVALID_REQUEST" {
+		t.Errorf("error code = %q, want INVALID_REQUEST", code)
+	}
+}
+
+func TestUpdateScoringForeignGameReturns404(t *testing.T) {
+	games := &stubGames{gameErr: store.ErrNotFound}
+	rec := httptest.NewRecorder()
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", validScoringBody))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PUT scoring on foreign game = %d, want 404", rec.Code)
+	}
+	if code := decodeErrorCode(t, rec.Body.Bytes()); code != "GAME_NOT_FOUND" {
+		t.Errorf("error code = %q, want GAME_NOT_FOUND", code)
+	}
+}
+
+func TestUpdateScoringMalformedGameIDReturns404WithoutStoreCall(t *testing.T) {
+	games := draftGame()
+	rec := httptest.NewRecorder()
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/not-a-uuid/scoring", validScoringBody))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PUT scoring with malformed id = %d, want 404", rec.Code)
+	}
+	if len(games.gotGame) != 0 || len(games.scoringUpdates) != 0 {
+		t.Error("malformed id reached the store instead of short-circuiting")
+	}
+}
+
+func TestUpdateScoringNonDraftReturns409(t *testing.T) {
+	games := draftGame()
+	games.game.State = "lobby"
+	rec := httptest.NewRecorder()
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", validScoringBody))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("PUT scoring on non-draft game = %d, want 409", rec.Code)
+	}
+	if code := decodeErrorCode(t, rec.Body.Bytes()); code != "GAME_NOT_EDITABLE" {
+		t.Errorf("error code = %q, want GAME_NOT_EDITABLE", code)
+	}
+	if len(games.scoringUpdates) != 0 {
+		t.Error("non-draft scoring update reached the store")
+	}
+}
+
+func TestUpdateScoringDraftCheckPrecedesValidation(t *testing.T) {
+	// The game's state answers before the body is judged (handleUpdateQuestion
+	// order): a non-draft or foreign game gets its 409/404 even when the body
+	// is also invalid — never a misleading VALIDATION_FAILED.
+	invalidBody := `{"pointsPerCorrect":-1,"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":20}`
+
+	nonDraft := draftGame()
+	nonDraft.game.State = "lobby"
+	rec := httptest.NewRecorder()
+	gamesRouter(nonDraft).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", invalidBody))
+	if rec.Code != http.StatusConflict {
+		t.Errorf("invalid body on non-draft game = %d, want 409", rec.Code)
+	}
+
+	foreign := &stubGames{gameErr: store.ErrNotFound}
+	rec = httptest.NewRecorder()
+	gamesRouter(foreign).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", invalidBody))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("invalid body on foreign game = %d, want 404", rec.Code)
+	}
+}
+
+func TestUpdateScoringBodyTooLargeReturns413(t *testing.T) {
+	games := draftGame()
+	rec := httptest.NewRecorder()
+	body := `{"pointsPerCorrect":100,"speedBonusFirst":50,"speedBonusSecond":30,"speedBonusThird":20,"junk":"` + strings.Repeat("x", 65<<10) + `"}`
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", body))
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized scoring body = %d, want 413", rec.Code)
+	}
+	if code := decodeErrorCode(t, rec.Body.Bytes()); code != "REQUEST_TOO_LARGE" {
+		t.Errorf("error code = %q, want REQUEST_TOO_LARGE", code)
+	}
+}
+
+func TestGamePayloadsCarryScoring(t *testing.T) {
+	// AC-1: defaults live in the schema and flow through every game payload —
+	// detail (editor pre-fill) and list alike.
+	games := draftGame()
+	rec := httptest.NewRecorder()
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/games/"+testGameID, ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/games/{id} = %d, want 200", rec.Code)
+	}
+	var detail struct {
+		PointsPerCorrect int `json:"pointsPerCorrect"`
+		SpeedBonusFirst  int `json:"speedBonusFirst"`
+		SpeedBonusSecond int `json:"speedBonusSecond"`
+		SpeedBonusThird  int `json:"speedBonusThird"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("game detail is not valid JSON: %v", err)
+	}
+	if detail.PointsPerCorrect != 100 || detail.SpeedBonusFirst != 50 ||
+		detail.SpeedBonusSecond != 30 || detail.SpeedBonusThird != 20 {
+		t.Errorf("detail scoring = %+v, want the 100/50/30/20 defaults", detail)
+	}
+
+	// The list handler copies gen.Game field-by-field — regression-guard the
+	// scoring fields there too.
+	games.rows = []gen.ListGamesByOrganizerRow{{
+		ID:               testGameID,
+		OrganizerID:      "org-1",
+		Title:            "ערב טריוויה",
+		JoinCode:         "AB2CD3",
+		State:            "draft",
+		PointsPerCorrect: 100,
+		SpeedBonusFirst:  50,
+		SpeedBonusSecond: 30,
+		SpeedBonusThird:  20,
+	}}
+	rec = httptest.NewRecorder()
+	gamesRouter(games).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/games", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/games = %d, want 200", rec.Code)
+	}
+	var list struct {
+		Items []struct {
+			PointsPerCorrect int `json:"pointsPerCorrect"`
+			SpeedBonusFirst  int `json:"speedBonusFirst"`
+			SpeedBonusSecond int `json:"speedBonusSecond"`
+			SpeedBonusThird  int `json:"speedBonusThird"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("list response is not valid JSON: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].PointsPerCorrect != 100 ||
+		list.Items[0].SpeedBonusFirst != 50 || list.Items[0].SpeedBonusSecond != 30 ||
+		list.Items[0].SpeedBonusThird != 20 {
+		t.Errorf("list scoring = %+v, want 100/50/30/20 on the list payload", list.Items)
 	}
 }

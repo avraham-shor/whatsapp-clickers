@@ -19,6 +19,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { QuestionEditor } from '@/features/builder/question-editor'
+import { ScoringEditor } from '@/features/builder/scoring-editor'
 
 type EditorState =
   | { mode: 'closed' }
@@ -154,6 +155,11 @@ export function GameEditorPage() {
           ))}
         </ol>
       )}
+
+      {/* Game-level configuration below the questions — authoring stays the
+          page's primary content (story 1.4 placement decision). key remounts
+          the form when the route swaps games, so useState re-seeds. */}
+      <ScoringEditor key={game.data.id} game={game.data} />
 
       {editor.mode !== 'closed' && (
         <QuestionEditor

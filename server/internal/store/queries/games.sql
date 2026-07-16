@@ -16,3 +16,13 @@ ORDER BY g.created_at DESC;
 -- name: GetGameForOrganizer :one
 SELECT * FROM games
 WHERE id = $1 AND organizer_id = $2;
+
+-- name: UpdateGameScoring :one
+UPDATE games
+SET points_per_correct = $3,
+    speed_bonus_first = $4,
+    speed_bonus_second = $5,
+    speed_bonus_third = $6,
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2
+RETURNING *;

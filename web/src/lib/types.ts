@@ -35,6 +35,11 @@ export interface GameListItem {
   joinCode: string
   state: GameState
   questionCount: number
+  /** Scoring configuration (FR-17 config half); 0 disables a bonus. */
+  pointsPerCorrect: number
+  speedBonusFirst: number
+  speedBonusSecond: number
+  speedBonusThird: number
   createdAt: string
   updatedAt: string
 }

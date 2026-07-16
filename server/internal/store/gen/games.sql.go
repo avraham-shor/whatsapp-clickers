@@ -13,7 +13,7 @@ import (
 const createGame = `-- name: CreateGame :one
 INSERT INTO games (organizer_id, title, join_code)
 VALUES ($1, $2, $3)
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third
 `
 
 type CreateGameParams struct {
@@ -33,12 +33,16 @@ func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, e
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
 	)
 	return i, err
 }
 
 const getGameForOrganizer = `-- name: GetGameForOrganizer :one
-SELECT id, organizer_id, title, join_code, state, created_at, updated_at FROM games
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third FROM games
 WHERE id = $1 AND organizer_id = $2
 `
 
@@ -60,12 +64,16 @@ func (q *Queries) GetGameForOrganizer(ctx context.Context, arg GetGameForOrganiz
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
 	)
 	return i, err
 }
 
 const listGamesByOrganizer = `-- name: ListGamesByOrganizer :many
-SELECT g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, count(q.id) AS question_count
+SELECT g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, count(q.id) AS question_count
 FROM games g
 LEFT JOIN questions q ON q.game_id = g.id
 WHERE g.organizer_id = $1
@@ -74,14 +82,18 @@ ORDER BY g.created_at DESC
 `
 
 type ListGamesByOrganizerRow struct {
-	ID            string
-	OrganizerID   string
-	Title         string
-	JoinCode      string
-	State         string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	QuestionCount int64
+	ID               string
+	OrganizerID      string
+	Title            string
+	JoinCode         string
+	State            string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	PointsPerCorrect int32
+	SpeedBonusFirst  int32
+	SpeedBonusSecond int32
+	SpeedBonusThird  int32
+	QuestionCount    int64
 }
 
 func (q *Queries) ListGamesByOrganizer(ctx context.Context, organizerID string) ([]ListGamesByOrganizerRow, error) {
@@ -101,6 +113,10 @@ func (q *Queries) ListGamesByOrganizer(ctx context.Context, organizerID string) 
 			&i.State,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PointsPerCorrect,
+			&i.SpeedBonusFirst,
+			&i.SpeedBonusSecond,
+			&i.SpeedBonusThird,
 			&i.QuestionCount,
 		); err != nil {
 			return nil, err
@@ -111,4 +127,50 @@ func (q *Queries) ListGamesByOrganizer(ctx context.Context, organizerID string) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateGameScoring = `-- name: UpdateGameScoring :one
+UPDATE games
+SET points_per_correct = $3,
+    speed_bonus_first = $4,
+    speed_bonus_second = $5,
+    speed_bonus_third = $6,
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third
+`
+
+type UpdateGameScoringParams struct {
+	ID               string
+	OrganizerID      string
+	PointsPerCorrect int32
+	SpeedBonusFirst  int32
+	SpeedBonusSecond int32
+	SpeedBonusThird  int32
+}
+
+func (q *Queries) UpdateGameScoring(ctx context.Context, arg UpdateGameScoringParams) (Game, error) {
+	row := q.db.QueryRow(ctx, updateGameScoring,
+		arg.ID,
+		arg.OrganizerID,
+		arg.PointsPerCorrect,
+		arg.SpeedBonusFirst,
+		arg.SpeedBonusSecond,
+		arg.SpeedBonusThird,
+	)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+	)
+	return i, err
 }

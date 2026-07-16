@@ -79,3 +79,31 @@ func (s *Store) GetGameForOrganizer(ctx context.Context, gameID, organizerID str
 	}
 	return game, err
 }
+
+// UpdateGameScoringParams carries a full scoring replacement for one game
+// (FR-17 configuration half): all four values are set on every call.
+type UpdateGameScoringParams struct {
+	GameID           string
+	OrganizerID      string
+	PointsPerCorrect int32
+	SpeedBonusFirst  int32
+	SpeedBonusSecond int32
+	SpeedBonusThird  int32
+}
+
+// UpdateGameScoring replaces the game's scoring configuration; ownership is
+// in the WHERE clause, so a foreign game is ErrNotFound like a missing one.
+func (s *Store) UpdateGameScoring(ctx context.Context, arg UpdateGameScoringParams) (gen.Game, error) {
+	game, err := s.q.UpdateGameScoring(ctx, gen.UpdateGameScoringParams{
+		ID:               arg.GameID,
+		OrganizerID:      arg.OrganizerID,
+		PointsPerCorrect: arg.PointsPerCorrect,
+		SpeedBonusFirst:  arg.SpeedBonusFirst,
+		SpeedBonusSecond: arg.SpeedBonusSecond,
+		SpeedBonusThird:  arg.SpeedBonusThird,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
