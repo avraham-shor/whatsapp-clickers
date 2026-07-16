@@ -29,7 +29,10 @@ func handleListQuestionPackages(games GameStore) http.HandlerFunc {
 		defer cancel()
 		rows, err := games.ListQuestionPackages(ctx)
 		if err != nil {
-			writeStoreError(w, err, "PACKAGE_NOT_FOUND")
+			// A plain :many pass-through — the only failure mode is
+			// infrastructure, never not-found.
+			slog.Error("package list failed", "error", err)
+			writeError(w, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "database is unreachable")
 			return
 		}
 		items := make([]packagePayload, 0, len(rows))

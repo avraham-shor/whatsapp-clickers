@@ -4,7 +4,7 @@ baseline_commit: 7f92258
 
 # Story 1.5: Question Bank Package Import
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -198,6 +198,7 @@ Modified:
 - 2026-07-16: Story created by create-story workflow — ultimate context engine analysis completed (epics, PRD FR-12/Glossary/OQ-4, architecture structure + patterns, EXPERIENCE.md bank/A13/empty states, 1.3+1.4 story and review intelligence, live codebase read: migrations 00003/00004, store games/questions + queries, httpapi games/questions/errors/router, game-editor-page, types.ts, strings.he.ts, sqlc.yaml). Status: ready-for-dev.
 - 2026-07-16: Story implemented by dev-story workflow (claude-fable-5) — migration 00005 (two bank tables + provenance column + seeded 10-question sample pack), store packages queries + atomic import copy, GET /api/question-packages + POST .../questions/import-package with 11 new handler tests (67 httpapi + 4 store green), import dialog + "מהמאגר" badge + dual-CTA/empty-bank states; all gates green; API E2E 35/35 + visual E2E 18/18 vs built binary + Docker Postgres; migration verified on existing + fresh DB with down/up round-trip. Status: review.
 - 2026-07-16: Code review completed (bmad-code-review, 3 adversarial layers) — no AC violations, no High/Critical defects; 2 patch findings left as action items (stale store doc comment, dead PACKAGE_NOT_FOUND mapping in list handler), 4 deferred to deferred-work.md, 6 dismissed. Status: in-progress until patch items are resolved.
+- 2026-07-17: Both patch findings resolved — store doc comment corrected, list-handler error mapping replaced with direct infrastructure-failure handling; `go build` + httpapi/store tests green. Status: done.
 
 ## Review Findings
 
@@ -205,10 +206,10 @@ Modified:
 
 Outcome: **no acceptance-criteria violations, no High/Critical defects.** The Acceptance Auditor confirmed all four ACs met and that `package_questions` CHECK constraints are byte-identical to `questions` (so the `INSERT … SELECT` copy can never violate a target CHECK). Triage: 2 patch, 4 deferred, 6 dismissed as noise/by-design.
 
-**Patch (unchecked — address before marking done):**
+**Patch (resolved 2026-07-17):**
 
-- [ ] [Review][Patch] Inaccurate store doc comment — comment claims a missing/foreign game surfaces "as ErrNotFound to the caller via zero rows", but the code returns `([], nil)` for that case; ownership safety actually rests entirely on the handler's `requireDraftGame`. Fix the comment to describe real behavior. [server/internal/store/packages.go:22-24]
-- [ ] [Review][Patch] Dead/misleading `PACKAGE_NOT_FOUND` in the list handler — `ListQuestionPackages` is a plain `:many` pass-through that never returns `store.ErrNotFound`, so the not-found code is unreachable and a real DB failure falls through to the 503 default. Drop or correct the argument. [server/internal/httpapi/packages.go:32]
+- [x] [Review][Patch] Inaccurate store doc comment — comment claims a missing/foreign game surfaces "as ErrNotFound to the caller via zero rows", but the code returns `([], nil)` for that case; ownership safety actually rests entirely on the handler's `requireDraftGame`. Fix the comment to describe real behavior. [server/internal/store/packages.go:22-24] — comment rewritten to state the empty-slice/nil-error behavior and that `requireDraftGame` owns the check.
+- [x] [Review][Patch] Dead/misleading `PACKAGE_NOT_FOUND` in the list handler — `ListQuestionPackages` is a plain `:many` pass-through that never returns `store.ErrNotFound`, so the not-found code is unreachable and a real DB failure falls through to the 503 default. Drop or correct the argument. [server/internal/httpapi/packages.go:32] — replaced `writeStoreError` with direct `slog.Error` + 503 `DB_UNAVAILABLE`, matching the auth-handler infrastructure-failure pattern.
 
 **Deferred (accepted / out of scope — logged to deferred-work.md):**
 
