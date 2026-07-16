@@ -4,7 +4,7 @@ baseline_commit: 4bb7893
 
 # Story 1.3: Create a Game and Author Questions
 
-Status: review
+Status: done
 
 ## Story
 
@@ -214,3 +214,12 @@ Modified:
 
 - 2026-07-15: Story created by create-story workflow — ultimate context engine analysis completed (epics, PRD, architecture, UX spine, DESIGN tokens, 1.2 story intelligence, live codebase read: router/middleware/auth handlers/store/sqlc.yaml/migrations/app.tsx/api.ts/strings/index.css). Status: ready-for-dev.
 - 2026-07-15: Story implemented by dev-story workflow (claude-fable-5) — all 8 tasks complete: games/questions schema + store layer, HTTP CRUD surface with central error mapper, dashboard shell, games list + create dialog, game editor, question editor, spacing-scale deferred item closed, full quality gates + API/visual E2E against local Postgres. Status: review.
+
+## Review Findings
+
+_Code review 2026-07-15 (bmad-code-review — 3 parallel adversarial layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor, all Opus 4.8). Verdict: unusually clean, all 5 ACs met. 3 patch, 1 deferred, 2 dismissed as noise. No Critical/High/Medium findings._
+
+- [x] [Review][Patch] Delete-question mutation lacks `onError`/`onSettled` — a concurrent or already-deleted question returns 404, but only `onSuccess` invalidates, so the phantom row stays rendered with a permanent "delete failed" banner and retry re-issues the same 404 forever (mirror the reorder mutation's `onSettled` invalidation) [web/src/features/builder/game-editor-page.tsx:190-199]
+- [x] [Review][Patch] Accepted-answers list keyed by array `index` — removing a row reindexes surviving rows, so React can misplace focus/caret; use a stable per-row key [web/src/features/builder/question-editor.tsx:240-241]
+- [x] [Review][Patch] Client length checks use UTF-16 `.length` while the server counts runes (`utf8.RuneCountInString`) — client over-rejects non-BMP (emoji/astral) input near the caps; safe direction (server authoritative) so cosmetic, but the two layers disagree [web/src/features/builder/question-editor.tsx:83,101,121; web/src/features/builder/games-list-page.tsx:139]
+- [x] [Review][Defer] Concurrent `CreateQuestion` can mint duplicate `position` values — `MAX(position)+1` is a read-compute-write with no serialization and (by documented design) no `UNIQUE (game_id, position)`; two interleaved creates for the same game collide. Self-healing (the next transactional reorder rewrites 1..N; `ORDER BY position, created_at` keeps display deterministic) [server/internal/store/queries/questions.sql; server/migrations/00003_games_questions.sql] — deferred, documented design tradeoff; revisit if concurrent/multi-tab authoring becomes real

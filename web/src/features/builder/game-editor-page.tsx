@@ -192,7 +192,10 @@ function QuestionRow({
       api<void>(`/api/games/${gameId}/questions/${question.id}`, {
         method: 'DELETE',
       }),
-    onSuccess: () => {
+    // Reconcile on both success and error: a 404 (question already deleted in
+    // another tab) must refetch so the phantom row — and its error banner —
+    // clear instead of sticking forever.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['games', gameId] })
       queryClient.invalidateQueries({ queryKey: ['games'] })
     },

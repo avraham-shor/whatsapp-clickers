@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '@/lib/api'
 import { strings } from '@/lib/strings.he'
+import { runeLength } from '@/lib/text'
 import type { Game, GameList } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import {
@@ -136,7 +137,7 @@ function CreateGameDialog() {
           onSubmit={(event) => {
             event.preventDefault()
             const trimmed = title.trim()
-            if (trimmed.length < 1 || trimmed.length > 120) {
+            if (runeLength(trimmed) < 1 || runeLength(trimmed) > 120) {
               setValidationError(true)
               return
             }

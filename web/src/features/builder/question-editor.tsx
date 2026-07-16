@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '@/lib/api'
 import { strings } from '@/lib/strings.he'
+import { runeLength } from '@/lib/text'
 import type { Question, QuestionType } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import {
@@ -51,8 +52,13 @@ export function QuestionEditor({
   const [correctOption, setCorrectOption] = useState(
     question?.correctOption ?? 0,
   )
-  const [answers, setAnswers] = useState<string[]>(
-    question?.acceptedAnswers ?? [''],
+  // Rows carry a stable id so add/remove keys by identity, not array index —
+  // index keys re-associate DOM nodes (and focus/caret) to shifted rows.
+  const [answers, setAnswers] = useState<{ id: string; value: string }[]>(() =>
+    (question?.acceptedAnswers ?? ['']).map((value) => ({
+      id: crypto.randomUUID(),
+      value,
+    })),
   )
   const [timeLimit, setTimeLimit] = useState(
     String(question?.timeLimitSeconds ?? DEFAULT_TIME_LIMIT),
@@ -80,7 +86,7 @@ export function QuestionEditor({
   // Client-side mirror of the server boundary rules (trim first).
   const submit = () => {
     const trimmedText = text.trim()
-    if (trimmedText.length < 1 || trimmedText.length > 500) {
+    if (runeLength(trimmedText) < 1 || runeLength(trimmedText) > 500) {
       setValidationMessage(strings.questionEditor.validationText)
       return
     }
@@ -98,7 +104,7 @@ export function QuestionEditor({
       const trimmedOptions = options.map((option) => option.trim())
       if (
         trimmedOptions.some(
-          (option) => option.length < 1 || option.length > 200,
+          (option) => runeLength(option) < 1 || runeLength(option) > 200,
         )
       ) {
         setValidationMessage(strings.questionEditor.validationOptions)
@@ -113,12 +119,12 @@ export function QuestionEditor({
     } else {
       // Empty rows are dropped; what remains must be 1–20 valid answers.
       const trimmedAnswers = answers
-        .map((answer) => answer.trim())
+        .map((answer) => answer.value.trim())
         .filter((answer) => answer.length > 0)
       if (
         trimmedAnswers.length < 1 ||
         trimmedAnswers.length > 20 ||
-        trimmedAnswers.some((answer) => answer.length > 200)
+        trimmedAnswers.some((answer) => runeLength(answer) > 200)
       ) {
         setValidationMessage(strings.questionEditor.validationAnswers)
         return
@@ -238,21 +244,23 @@ export function QuestionEditor({
                 {strings.questionEditor.acceptedAnswersHint}
               </p>
               {answers.map((answer, index) => (
-                <div key={index} className="flex items-center gap-3">
+                <div key={answer.id} className="flex items-center gap-3">
                   <Label
-                    htmlFor={`question-answer-${index}`}
+                    htmlFor={`question-answer-${answer.id}`}
                     className="w-24 shrink-0 text-host-text"
                   >
                     {strings.questionEditor.answerRowLabel(index + 1)}
                   </Label>
                   <Input
-                    id={`question-answer-${index}`}
+                    id={`question-answer-${answer.id}`}
                     className="h-10"
-                    value={answer}
+                    value={answer.value}
                     onChange={(event) =>
                       setAnswers((current) =>
-                        current.map((a, i) =>
-                          i === index ? event.target.value : a,
+                        current.map((a) =>
+                          a.id === answer.id
+                            ? { ...a, value: event.target.value }
+                            : a,
                         ),
                       )
                     }
@@ -264,7 +272,7 @@ export function QuestionEditor({
                     disabled={answers.length === 1}
                     onClick={() =>
                       setAnswers((current) =>
-                        current.filter((_, i) => i !== index),
+                        current.filter((a) => a.id !== answer.id),
                       )
                     }
                   >
@@ -277,7 +285,12 @@ export function QuestionEditor({
                 variant="outline"
                 className="h-10 self-start border-host-border text-host-text"
                 disabled={answers.length >= 20}
-                onClick={() => setAnswers((current) => [...current, ''])}
+                onClick={() =>
+                  setAnswers((current) => [
+                    ...current,
+                    { id: crypto.randomUUID(), value: '' },
+                  ])
+                }
               >
                 {strings.questionEditor.addAnswer}
               </Button>
