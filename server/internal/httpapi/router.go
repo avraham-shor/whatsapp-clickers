@@ -22,8 +22,16 @@ type Pinger interface {
 
 // NewRouter builds the full HTTP handler. static holds the built SPA
 // (index.html at its root); nil disables static serving (API-only).
-func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS) http.Handler {
+// webhook is mounted at /webhooks/whatsapp outside /api with no session
+// middleware — Story 2.1's HMAC check is its own auth; nil omits the
+// branch entirely (keeps callers that don't need it, e.g. most tests,
+// compiling with a single added nil arg).
+func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, webhook http.Handler) http.Handler {
 	r := chi.NewRouter()
+
+	if webhook != nil {
+		r.Mount("/webhooks/whatsapp", webhook)
+	}
 
 	r.Route("/api", func(api chi.Router) {
 		// The subrouter does not inherit the root handlers set below —

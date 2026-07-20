@@ -153,6 +153,75 @@ func TestLoadSessionSecretRealValuePasses(t *testing.T) {
 	}
 }
 
+func TestLoadWhatsAppDummyRejected(t *testing.T) {
+	env := fullEnv()
+	env["WHATSAPP_ACCESS_TOKEN"] = "dummy"
+
+	_, err := load(lookupFromMap(env))
+	if err == nil {
+		t.Fatal("load() succeeded with dummy WHATSAPP_ACCESS_TOKEN, want error")
+	}
+	if !strings.Contains(err.Error(), "WHATSAPP_ACCESS_TOKEN") {
+		t.Errorf("error %q does not name WHATSAPP_ACCESS_TOKEN", err.Error())
+	}
+	if !strings.Contains(err.Error(), "README") {
+		t.Errorf("error %q does not point at the README Meta runbook", err.Error())
+	}
+}
+
+func TestLoadWhatsAppChangeMePrefixRejected(t *testing.T) {
+	for _, name := range []string{"WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN"} {
+		env := fullEnv()
+		env[name] = "change-me-please"
+
+		_, err := load(lookupFromMap(env))
+		if err == nil {
+			t.Fatalf("load() succeeded with change-me %s, want error", name)
+		}
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q does not name %s", err.Error(), name)
+		}
+	}
+}
+
+func TestLoadWhatsAppAllFourDummyNamedInOneError(t *testing.T) {
+	env := fullEnv()
+	env["WHATSAPP_ACCESS_TOKEN"] = "dummy"
+	env["WHATSAPP_PHONE_NUMBER_ID"] = "dummy"
+	env["WHATSAPP_APP_SECRET"] = "dummy"
+	env["WHATSAPP_VERIFY_TOKEN"] = "dummy"
+
+	_, err := load(lookupFromMap(env))
+	if err == nil {
+		t.Fatal("load() succeeded with all WhatsApp vars dummy, want error")
+	}
+	for _, name := range []string{"WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q does not name %s (want all four offenders in one error)", err.Error(), name)
+		}
+	}
+}
+
+func TestLoadWhatsAppValidValuesPass(t *testing.T) {
+	cfg, err := load(lookupFromMap(fullEnv()))
+	if err != nil {
+		t.Fatalf("load() rejected real-looking WhatsApp values: %v", err)
+	}
+	if cfg.WhatsAppAccessToken != "token" {
+		t.Errorf("WhatsAppAccessToken = %q, want %q", cfg.WhatsAppAccessToken, "token")
+	}
+}
+
+func TestLoadAnthropicKeyDummyStillBoots(t *testing.T) {
+	env := fullEnv()
+	env["ANTHROPIC_API_KEY"] = "dummy"
+
+	_, err := load(lookupFromMap(env))
+	if err != nil {
+		t.Fatalf("load() rejected dummy ANTHROPIC_API_KEY, want it to still boot (Epic 3 concern): %v", err)
+	}
+}
+
 func TestLoadReadsProcessEnv(t *testing.T) {
 	for name, value := range fullEnv() {
 		t.Setenv(name, value)

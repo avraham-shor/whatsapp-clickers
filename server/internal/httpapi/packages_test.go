@@ -78,7 +78,7 @@ func TestListQuestionPackagesEmptyBankReturnsEmptyItems(t *testing.T) {
 }
 
 func TestPackageRoutesWithoutSessionReturn401(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), draftGame(), testStatic())
+	router := NewRouter(stubPinger{}, noAuth(), draftGame(), testStatic(), nil)
 	for name, req := range map[string]*http.Request{
 		"list packages":  httptest.NewRequest(http.MethodGet, "/api/question-packages", nil),
 		"import package": httptest.NewRequest(http.MethodPost, importPath, strings.NewReader(validImportBody())),

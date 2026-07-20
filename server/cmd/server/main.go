@@ -17,9 +17,21 @@ import (
 	"github.com/avraham-shor/whatsapp-clickers/internal/config"
 	"github.com/avraham-shor/whatsapp-clickers/internal/httpapi"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
+	"github.com/avraham-shor/whatsapp-clickers/internal/wa"
 	"github.com/avraham-shor/whatsapp-clickers/internal/webdist"
 	"github.com/avraham-shor/whatsapp-clickers/migrations"
 )
+
+// stubInboundHandler is the 2.1 placeholder wa.InboundHandler: it only
+// logs. Story 2.2 replaces it with the real message router/parser.
+type stubInboundHandler struct {
+	logger *slog.Logger
+}
+
+func (h stubInboundHandler) Handle(ctx context.Context, msg wa.InboundMessage) {
+	h.logger.Info("inbound message received (no handler yet)",
+		"wa_message_id", msg.WaMessageID, "type", msg.Type, "phone_last4", wa.PhoneLast4(msg.From))
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -65,8 +77,15 @@ func run(logger *slog.Logger) error {
 
 	st := store.New(pool)
 	authSvc := auth.NewService(st, cfg.SessionSecret)
+
+	waClient := wa.NewClient(cfg.WhatsAppAccessToken, cfg.WhatsAppPhoneNumberID)
+	dispatcher := wa.NewDispatcher(waClient, logger)
+	go dispatcher.Run(ctx)
+	// st satisfies Deduper directly (MarkWaMessageProcessed).
+	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, st, stubInboundHandler{logger: logger}, logger)
+
 	// st satisfies both Pinger and GameStore.
-	router := httpapi.NewRouter(st, authSvc, st, webdist.FS())
+	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

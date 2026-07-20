@@ -72,3 +72,8 @@ type Session struct {
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
 }
+
+type WaInboundMessage struct {
+	WaMessageID string
+	ReceivedAt  time.Time
+}

@@ -30,9 +30,12 @@ The production artifact is a **single Go binary** that embeds the built SPA
 
 ### Setup
 
-1. `cp server/.env.example server/.env` and fill values (dummy values are fine
-   for everything except `DATABASE_URL` in this phase). Load it into your shell
-   before running the server (e.g. `set -a; . server/.env; set +a` in Git Bash).
+1. `cp server/.env.example server/.env` and fill values. `DATABASE_URL` and
+   the four `WHATSAPP_*` values must be real (see "Meta WhatsApp Business
+   setup" below — the server refuses to boot on placeholder WhatsApp values
+   since Story 2.1); `ANTHROPIC_API_KEY` can stay `dummy` until Epic 3. Load
+   the file into your shell before running the server (e.g.
+   `set -a; . server/.env; set +a` in Git Bash).
 2. `cd web && npm install`
 
 ### Run
@@ -112,9 +115,11 @@ in-memory WebSocket hub assumes a single instance — do not enable autoscaling)
    deploy on push to `main`, and enable **"wait for CI"**.
 3. Add a managed **PostgreSQL** database to the project.
 4. On the service, set environment variables (see `server/.env.example`):
-   `DATABASE_URL` (reference the Railway Postgres variable), the five WhatsApp/
-   Anthropic secrets (dummy values acceptable until Epics 2–3), and
-   `SESSION_SECRET` (long random string). Railway injects `PORT` itself.
+   `DATABASE_URL` (reference the Railway Postgres variable), the four
+   `WHATSAPP_*` values (real test-number values — see "Meta WhatsApp
+   Business setup" above), `ANTHROPIC_API_KEY` (dummy is still fine — Epic 3
+   is the first consumer), and `SESSION_SECRET` (long random string).
+   Railway injects `PORT` itself.
 
    ⚠️ **`SESSION_SECRET` is enforced since Story 1.2**: the server refuses to
    boot if it is shorter than 32 characters or still starts with `change-me`.
@@ -122,6 +127,18 @@ in-memory WebSocket hub assumes a single instance — do not enable autoscaling)
    Railway Variables with a real random value (`openssl rand -base64 48`)
    BEFORE merging Story 1.2 to `main`**, or the next deploy will fail fast at
    boot (by design).
+
+   ⚠️ **`WHATSAPP_*` values are enforced since Story 2.1**: the server
+   refuses to boot if any of the four is still `dummy` or starts with
+   `change-me`. Set real values from the "Meta WhatsApp Business setup"
+   runbook above in Railway Variables **before merging Story 2.1 to
+   `main`**, or the next deploy will fail fast at boot (by design — same
+   pattern as the `SESSION_SECRET` warning above). Production callback URL
+   is the Railway domain + `/webhooks/whatsapp` — point Meta's webhook
+   configuration at it when moving from local dev-tunnel testing to
+   deployed testing (one app has one callback URL; dev tunnel and
+   production alternate by re-running "Verify and save", which is
+   acceptable for the pilot).
 5. Confirm replicas = 1 (Settings → Scaling).
 6. Verify the deployed URL: `/` serves the SPA (Hebrew, RTL), `GET /api/health`
    returns 200, and boot logs show `migrations applied`.
@@ -146,15 +163,74 @@ service's Connect tab and run the same command with it. Running the command
 without piping input prompts for the password interactively (input is echoed
 — prefer the piped form on a shared screen).
 
-### Meta WhatsApp Business setup — deferred to Epic 2 start (owner decision 2026-07-13)
+### Meta WhatsApp Business setup
 
-Setup plan: a personal Facebook account was created now so it ages; at Epic 2
-start, create a free Business Portfolio + test number (~30 min, no registered
-business entity needed). Full business verification is deferred until the
-system proves itself — an unverified WABA suffices for a modest pilot on the
-user-initiated flow. Pricing was re-verified against official Meta docs
-(2026-07-13): service messages are free AND service-window replies are exempt
-from tier messaging limits, so the ≈₪0 assumption holds. Revisit at Story 2.1.
+Setup runbook for the Meta Cloud API (direct — no BSP middleman). A free
+**test number** is sufficient for all of Epic 2 development (up to 5
+registered recipients); a real dedicated number and business verification
+are deliberately deferred until the system proves itself (pricing
+re-verified 2026-07-13: service-window replies are free and exempt from
+tier messaging limits, so the ≈₪0 assumption holds).
+
+1. **Business Portfolio**: `business.facebook.com` → Create a business
+   portfolio. No registered legal entity (עוסק) is required at this stage.
+2. **Meta app**: `developers.facebook.com` → My Apps → Create App → type
+   **Business**, linked to the portfolio above.
+3. **WhatsApp product**: app dashboard → Add product → WhatsApp → Set up.
+   This creates a WhatsApp Business Account, a free test phone number, a
+   temporary access token (~24h), and the Phone Number ID.
+4. **Register test recipients** (up to 5 — the hard cap for a test number):
+   WhatsApp → API Setup → the "To" field → Manage phone number list → add
+   and verify each recipient's real WhatsApp number.
+5. **The four env values** (`server/.env` and Railway Variables — see
+   `server/.env.example` for the full description of each):
+   - `WHATSAPP_ACCESS_TOKEN` — a **System User** permanent token (Business
+     settings → Users → System users → Add, role Admin → Assign assets →
+     the app → Generate token → expiry never → permissions
+     `whatsapp_business_messaging` + `whatsapp_business_management`). The
+     API Setup screen's temporary token also works but expires in ~24h —
+     regenerate it every dev session if you use that instead.
+   - `WHATSAPP_PHONE_NUMBER_ID` — App dashboard → WhatsApp → API Setup
+     (shown under the test number; the ID, never the display number).
+   - `WHATSAPP_APP_SECRET` — App dashboard → App settings → Basic → App
+     secret (click Show). HMAC-verifies every inbound webhook.
+   - `WHATSAPP_VERIFY_TOKEN` — you invent this (e.g. `openssl rand -hex
+     16`); paste the same value into the webhook subscription screen below.
+6. **Webhook subscription**: app dashboard → WhatsApp → Configuration → set
+   the **Callback URL** (see "Local webhook development" below for the
+   local value) and **Verify Token** (your `WHATSAPP_VERIFY_TOKEN`) →
+   **Verify and save** (fires our `GET /webhooks/whatsapp` handshake — a
+   green check means it passed) → subscribe to the **`messages`** webhook
+   field.
+
+⚠️ From Story 2.1 onward the server refuses to boot with placeholder
+WhatsApp values (`dummy` / `change-me...`) — real test-number values from
+steps 1–5 above are required for `make dev`.
+
+### Local webhook development
+
+Meta must reach your local server over HTTPS, so a tunnel stands in for a
+public URL during development:
+
+1. Install cloudflared: Windows `winget install Cloudflare.cloudflared`.
+2. `cloudflared tunnel --url http://localhost:8080` — no account needed
+   (quick tunnel). It targets the **Go server on :8080 directly**, not the
+   Vite dev server on :5173 — the Vite proxy is for browser dev, not Meta.
+3. Use the printed `https://<random>.trycloudflare.com/webhooks/whatsapp`
+   as the Callback URL in step 6 above.
+4. The quick-tunnel URL changes every run — re-run "Verify and save" each
+   dev session (~30 seconds).
+
+**Network filter note** (confirmed 2026-07-19 against an Etrog-type
+filter): if your network filter refuses `facebook.com` /
+`business.facebook.com` / `developers.facebook.com` / `graph.facebook.com`
+outright, the Meta *dashboard* screens above (portfolio, app, test number,
+tokens, webhook config) need an unfiltered connection — e.g. a mobile
+hotspot for that one session; it's dashboard-only traffic, so connection
+quality doesn't matter. The tunnel and local server themselves are
+unaffected: cloudflared talks to Cloudflare, not Meta, and Meta's inbound
+webhook calls arrive through the tunnel regardless of the local network's
+outbound filter.
 
 ## Custom domain (open decision — not implemented)
 

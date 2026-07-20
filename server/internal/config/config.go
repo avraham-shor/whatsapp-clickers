@@ -59,6 +59,10 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 		return nil, err
 	}
 
+	if err := validateWhatsAppValues(cfg); err != nil {
+		return nil, err
+	}
+
 	cfg.Port = defaultPort
 	if port, ok := lookup("PORT"); ok && port != "" {
 		cfg.Port = port
@@ -77,4 +81,33 @@ func validateSessionSecret(secret string) error {
 		return fmt.Errorf("SESSION_SECRET must be at least %d characters, got %d; %s", minSessionSecretLen, len(secret), hint)
 	}
 	return nil
+}
+
+// validateWhatsAppValues rejects the documented .env.example placeholders
+// for the four Meta WhatsApp Cloud API variables, collecting every offender
+// into one error (fix-all-in-one-pass, mirrors validateSessionSecret).
+// ANTHROPIC_API_KEY is deliberately NOT validated here: it stays the
+// documented "dummy" placeholder until Epic 3 (story 3.6) consumes it, so
+// validating it now would fail-fast boots for zero safety gain.
+func validateWhatsAppValues(cfg *Config) error {
+	candidates := []struct {
+		name  string
+		value string
+	}{
+		{"WHATSAPP_ACCESS_TOKEN", cfg.WhatsAppAccessToken},
+		{"WHATSAPP_PHONE_NUMBER_ID", cfg.WhatsAppPhoneNumberID},
+		{"WHATSAPP_APP_SECRET", cfg.WhatsAppAppSecret},
+		{"WHATSAPP_VERIFY_TOKEN", cfg.WhatsAppVerifyToken},
+	}
+
+	var offenders []string
+	for _, c := range candidates {
+		if c.value == "dummy" || strings.HasPrefix(c.value, "change-me") {
+			offenders = append(offenders, c.name)
+		}
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+	return fmt.Errorf("still the documented placeholder value: %s; see the README \"Meta WhatsApp Business setup\" runbook for real values", strings.Join(offenders, ", "))
 }
