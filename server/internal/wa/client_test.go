@@ -93,6 +93,31 @@ func TestClientSendTextErrorResponse(t *testing.T) {
 	}
 }
 
+func TestClientSendTextRedactsPhoneInMetaError(t *testing.T) {
+	// Meta echoes the full recipient number inside error.message; the returned
+	// error (which the dispatcher logs) must not carry it (NFR-4).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"Recipient 972500000000 is not in allowed list","code":131030}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("test-token", "PHONE123", WithBaseURL(srv.URL))
+	err := c.SendText(context.Background(), "972500000000", "hello")
+	if err == nil {
+		t.Fatal("SendText() succeeded, want error on 4xx")
+	}
+	if strings.Contains(err.Error(), "972500000000") {
+		t.Errorf("error %q leaks the full recipient number from the Meta message", err.Error())
+	}
+	if !strings.Contains(err.Error(), "131030") {
+		t.Errorf("error %q dropped the Meta error code (a short number must survive)", err.Error())
+	}
+	if !strings.Contains(err.Error(), "not in allowed list") {
+		t.Errorf("error %q dropped the non-digit context from the Meta message", err.Error())
+	}
+}
+
 func TestClientSendTextServerErrorResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

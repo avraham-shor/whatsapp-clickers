@@ -201,6 +201,35 @@ func TestWebhookPostDuplicateSkipsHandler(t *testing.T) {
 	}
 }
 
+func TestWebhookPostMissingMessageIDDropped(t *testing.T) {
+	secret := "secret"
+	dedupe := &stubDeduper{}
+	inbound := &stubInboundHandler{}
+	logger, buf := newTestLogger()
+	h := NewWebhookHandler(secret, "verify-token", dedupe, inbound, logger)
+
+	// Authentic payload whose message has no "id" — malformed; must be dropped
+	// rather than deduped on the empty-string key.
+	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[{"from":"972500000000","type":"text","text":{"body":"hi"}}]}}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sign(t, secret, body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(inbound.calls) != 0 {
+		t.Errorf("handler called %d times, want 0 (missing id)", len(inbound.calls))
+	}
+	if len(dedupe.calls) != 0 {
+		t.Errorf("dedupe called %d times, want 0 (no empty-string key insert)", len(dedupe.calls))
+	}
+	if !strings.Contains(buf.String(), "inbound message missing id") {
+		t.Errorf("log missing the drop WARN: %s", buf.String())
+	}
+}
+
 func TestWebhookPostStatusesOnlyIgnored(t *testing.T) {
 	secret := "secret"
 	dedupe := &stubDeduper{}

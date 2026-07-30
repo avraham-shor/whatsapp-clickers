@@ -18,6 +18,12 @@ import (
 // small; the cap is hostile-input hygiene, not a real-world limit.
 const maxWebhookBodyBytes = 256 * 1024
 
+// dedupeDBTimeout bounds the per-message dedupe INSERT so a hung Postgres
+// cannot pin the synchronous webhook goroutine past Meta's response window
+// (which would trigger the retry-storm the 200-always design avoids). Mirrors
+// the 5s deadline every httpapi DB handler already imposes.
+const dedupeDBTimeout = 5 * time.Second
+
 // InboundMessage is the normalized shape every wa consumer works with,
 // independent of Meta's webhook envelope.
 type InboundMessage struct {
@@ -210,21 +216,34 @@ func (h *webhookHandler) processMessage(ctx context.Context, contacts []metaCont
 		msg.TextBody = m.Text.Body
 	}
 
-	first, err := h.dedupe.MarkWaMessageProcessed(ctx, msg.WaMessageID)
+	// Meta always supplies a message id; an empty one is a malformed payload.
+	// Dropping it (rather than deduping on "") avoids a first empty-id message
+	// poisoning the empty-string PK and swallowing every later id-less message
+	// as a false duplicate.
+	if msg.WaMessageID == "" {
+		h.logger.Warn("inbound message missing id, dropped",
+			"type", msg.Type, "phone_last4", PhoneLast4(msg.From))
+		return
+	}
+
+	dbCtx, cancel := context.WithTimeout(ctx, dedupeDBTimeout)
+	defer cancel()
+	first, err := h.dedupe.MarkWaMessageProcessed(dbCtx, msg.WaMessageID)
 	switch {
 	case err != nil:
 		// A DB blip must not silence the chat: process anyway (SM-C2
 		// posture). Duplicate risk during the blip is accepted and logged.
 		h.logger.Warn("dedupe check failed, processing anyway",
-			"wa_message_id", msg.WaMessageID, "dedupe_degraded", true, "error", err.Error())
+			"wa_message_id", WaMessageIDDigest(msg.WaMessageID), "dedupe_degraded", true, "error", err.Error())
 	case !first:
-		h.logger.Info("duplicate webhook delivery skipped", "wa_message_id", msg.WaMessageID)
+		h.logger.Info("duplicate webhook delivery skipped",
+			"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
 		return
 	}
 
 	h.inbound.Handle(ctx, msg)
 	h.logger.Info("inbound message accepted",
-		"wa_message_id", msg.WaMessageID, "type", msg.Type, "phone_last4", PhoneLast4(msg.From))
+		"wa_message_id", WaMessageIDDigest(msg.WaMessageID), "type", msg.Type, "phone_last4", PhoneLast4(msg.From))
 }
 
 func profileNameFor(contacts []metaContact, from string) string {

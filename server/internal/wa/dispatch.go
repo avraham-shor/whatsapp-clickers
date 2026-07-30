@@ -32,6 +32,16 @@ const (
 // waits exist because dispatchMaxAttempts caps the total at 3 sends.
 var dispatchBackoff = []time.Duration{1 * time.Second, 2 * time.Second}
 
+func init() {
+	// One backoff wait sits between each pair of attempts, so the table must
+	// have exactly dispatchMaxAttempts-1 entries. Bumping the attempt count
+	// without extending the table would otherwise panic on dispatchBackoff
+	// out-of-range at the first failing send; fail loudly at startup instead.
+	if len(dispatchBackoff) != dispatchMaxAttempts-1 {
+		panic("wa: dispatchBackoff must have dispatchMaxAttempts-1 entries")
+	}
+}
+
 // SenderClient sends one WhatsApp text message. Consumer-defined so
 // Dispatcher tests can inject a stub without a live Client.
 type SenderClient interface {
@@ -142,6 +152,12 @@ func (d *Dispatcher) send(ctx context.Context, msg outboundMessage) {
 		}
 		lastErr = d.client.SendText(ctx, msg.to, msg.body)
 		if lastErr == nil {
+			return
+		}
+		// A cancelled ctx (shutdown/redeploy) surfaces here as a send error,
+		// but it is not a real delivery failure: drop quietly rather than
+		// logging a misleading "send retry"/"send failed permanently" WARN.
+		if ctx.Err() != nil {
 			return
 		}
 		if attempt < dispatchMaxAttempts {

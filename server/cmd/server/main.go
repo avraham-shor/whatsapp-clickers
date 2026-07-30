@@ -30,7 +30,7 @@ type stubInboundHandler struct {
 
 func (h stubInboundHandler) Handle(ctx context.Context, msg wa.InboundMessage) {
 	h.logger.Info("inbound message received (no handler yet)",
-		"wa_message_id", msg.WaMessageID, "type", msg.Type, "phone_last4", wa.PhoneLast4(msg.From))
+		"wa_message_id", wa.WaMessageIDDigest(msg.WaMessageID), "type", msg.Type, "phone_last4", wa.PhoneLast4(msg.From))
 }
 
 func main() {

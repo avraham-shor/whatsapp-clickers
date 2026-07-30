@@ -203,6 +203,30 @@ tier messaging limits, so the ≈₪0 assumption holds).
    green check means it passed) → subscribe to the **`messages`** webhook
    field.
 
+   In Meta's newer console the classic screens are buried under *Use cases →
+   Customize*. Both are reachable directly, substituting your app ID:
+   `https://developers.facebook.com/apps/<APP_ID>/whatsapp-business/wa-settings/`
+   (Configuration) and `.../wa-dev-console/` (API Setup). If you have a token
+   but not the app ID, `GET /v25.0/debug_token?input_token=<TOKEN>&access_token=<TOKEN>`
+   returns it.
+7. ⚠️ **Subscribe the app to the WABA** — the step the console does *not*
+   do for you, and the one silent enough to cost an afternoon. Completing
+   step 6 stores the callback URL against your app, but the WhatsApp
+   Business Account may still be subscribed only to Meta's own
+   `WA DevX Webhook Events 1P App` (the first-party app that feeds the
+   console's webhook preview panel). While that is the case every screen
+   looks correctly configured and **no message ever reaches your server**.
+   Verify and fix over the API (system-user token):
+
+   ```sh
+   # Should list YOUR app; if it only lists WA DevX, POST to subscribe.
+   curl "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps?access_token=<TOKEN>"
+   curl -X POST "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps?access_token=<TOKEN>"
+   ```
+
+   Both apps may stay subscribed side by side — adding yours removes nothing.
+   Confirmed necessary 2026-07-30 on this project's own test number.
+
 ⚠️ From Story 2.1 onward the server refuses to boot with placeholder
 WhatsApp values (`dummy` / `change-me...`) — real test-number values from
 steps 1–5 above are required for `make dev`.
@@ -212,10 +236,19 @@ steps 1–5 above are required for `make dev`.
 Meta must reach your local server over HTTPS, so a tunnel stands in for a
 public URL during development:
 
-1. Install cloudflared: Windows `winget install Cloudflare.cloudflared`.
+1. Install cloudflared: Windows `winget install Cloudflare.cloudflared`. If
+   winget hangs (a strict network filter can stall it indefinitely), grab the
+   binary directly — it needs no installation:
+   `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe`
 2. `cloudflared tunnel --url http://localhost:8080` — no account needed
    (quick tunnel). It targets the **Go server on :8080 directly**, not the
    Vite dev server on :5173 — the Vite proxy is for browser dev, not Meta.
+
+   Add **`--protocol http2`** if the tunnel never registers and the log
+   repeats `Failed to dial a quic connection`. cloudflared prefers QUIC over
+   UDP/7844, which filtered networks routinely block; its own precheck
+   reports `UDP Connectivity … FAIL` and recommends http2 but still retries
+   QUIC. Forcing http2 makes it connect immediately (confirmed 2026-07-30).
 3. Use the printed `https://<random>.trycloudflare.com/webhooks/whatsapp`
    as the Callback URL in step 6 above.
 4. The quick-tunnel URL changes every run — re-run "Verify and save" each
