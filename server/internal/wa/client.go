@@ -114,7 +114,10 @@ func (c *Client) SendText(ctx context.Context, to, body string) error {
 		var metaErr metaErrorResponse
 		_ = json.NewDecoder(resp.Body).Decode(&metaErr) // best-effort; body may not be JSON
 		if metaErr.Error.Message != "" {
-			return fmt.Errorf("whatsapp send failed: status %d code %d: %s", resp.StatusCode, metaErr.Error.Code, metaErr.Error.Message)
+			// Meta's message is an uncontrolled external string that can echo
+			// the recipient number; scrub digit runs before it flows into the
+			// dispatcher's WARN logs (NFR-4).
+			return fmt.Errorf("whatsapp send failed: status %d code %d: %s", resp.StatusCode, metaErr.Error.Code, RedactDigits(metaErr.Error.Message))
 		}
 		return fmt.Errorf("whatsapp send failed: status %d", resp.StatusCode)
 	}
