@@ -82,7 +82,7 @@ func run(logger *slog.Logger) error {
 	dispatcher := wa.NewDispatcher(waClient, logger)
 	go dispatcher.Run(ctx)
 	// st satisfies Deduper directly (MarkWaMessageProcessed).
-	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, st, stubInboundHandler{logger: logger}, logger)
+	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, cfg.WhatsAppPhoneNumberID, st, stubInboundHandler{logger: logger}, logger)
 
 	// st satisfies both Pinger and GameStore.
 	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler)

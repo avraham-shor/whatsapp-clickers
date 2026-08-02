@@ -21,10 +21,19 @@ func PhoneLast4(msisdn string) string {
 	return msisdn[len(msisdn)-4:]
 }
 
-// longDigitRun matches any run of 7+ digits: long enough to be a phone number
-// or other sensitive identifier, short enough to leave HTTP status codes and
-// Meta error codes intact.
-var longDigitRun = regexp.MustCompile(`\d{7,}`)
+// longDigitRun matches a run of 7+ digits — contiguous, or separated by the
+// spaces, dots, hyphens, parentheses and leading "+" that phone numbers are
+// routinely formatted with. The original P6 pattern was `\d{7,}`, which let
+// "+972 50 123 4567" through untouched because no run reached 7 contiguous
+// digits.
+//
+// This deliberately over-matches: two adjacent numeric tokens in one string
+// (e.g. "code 131030 at 2026-07-30") can merge into a single match and be
+// redacted together. That is the correct failure direction for a PII guard on
+// an untrusted external string — the alternative failure mode is a
+// Participant's phone number in the logs. Standalone short codes (HTTP status,
+// Meta error code) are still left intact.
+var longDigitRun = regexp.MustCompile(`\+?\d(?:[ .()\-]*\d){6,}`)
 
 // RedactDigits masks every 7+ digit run in s with "[redacted]". Apply it to
 // untrusted external strings (e.g. Meta's send-error message) before logging
@@ -45,11 +54,11 @@ func RedactDigits(s string) string {
 // Participant's phone number (NFR-4) despite the phone_last4 discipline, and
 // RedactDigits cannot catch it because the leak is base64, not a digit run.
 //
-// The full wamid is still what the dedupe ledger stores and keys on — only the
-// log representation is digested. To correlate a log line with its
-// wa_inbound_messages row, digest the candidate rows and match:
-//
-//	SELECT wa_message_id FROM wa_inbound_messages;  -- then digest each
+// This digest is also what the dedupe ledger stores and keys on, so the raw
+// wamid never reaches durable storage either (migration 00007 — the original
+// schema kept it, on the since-disproved premise that wamids are opaque).
+// Dedupe is unaffected: the value is only ever compared for equality, so
+// log lines and ledger rows correlate directly on the same string.
 func WaMessageIDDigest(waMessageID string) string {
 	if waMessageID == "" {
 		return ""

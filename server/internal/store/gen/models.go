@@ -74,6 +74,7 @@ type Session struct {
 }
 
 type WaInboundMessage struct {
+	// SHA-256 digest of Meta's wamid (wa.WaMessageIDDigest), never the raw wamid: the raw value base64-encodes the sender MSISDN. Equality-only dedupe key.
 	WaMessageID string
 	ReceivedAt  time.Time
 }

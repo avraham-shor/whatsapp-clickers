@@ -59,7 +59,7 @@ func sign(t *testing.T, secret string, body []byte) string {
 // --- GET (Meta registration handshake) ---
 
 func TestWebhookGetHandshakeSuccess(t *testing.T) {
-	h := NewWebhookHandler("secret", "verify-token", &stubDeduper{}, &stubInboundHandler{}, nil)
+	h := NewWebhookHandler("secret", "verify-token", "", &stubDeduper{}, &stubInboundHandler{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=12345", nil)
 	rec := httptest.NewRecorder()
@@ -82,7 +82,7 @@ func TestWebhookGetHandshakeRejected(t *testing.T) {
 	}
 	for name, target := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := NewWebhookHandler("secret", "verify-token", &stubDeduper{}, &stubInboundHandler{}, nil)
+			h := NewWebhookHandler("secret", "verify-token", "", &stubDeduper{}, &stubInboundHandler{}, nil)
 			req := httptest.NewRequest(http.MethodGet, target, nil)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
@@ -102,7 +102,7 @@ func TestWebhookPostValidTextMessage(t *testing.T) {
 	secret := "app-secret"
 	dedupe := &stubDeduper{}
 	inbound := &stubInboundHandler{}
-	h := NewWebhookHandler(secret, "verify-token", dedupe, inbound, nil)
+	h := NewWebhookHandler(secret, "verify-token", "", dedupe, inbound, nil)
 
 	body := []byte(`{"entry":[{"changes":[{"value":{
 		"contacts":[{"wa_id":"972500000000","profile":{"name":"Avraham"}}],
@@ -138,8 +138,9 @@ func TestWebhookPostValidTextMessage(t *testing.T) {
 	if got.ReceivedAt.IsZero() {
 		t.Error("ReceivedAt not set")
 	}
-	if len(dedupe.calls) != 1 || dedupe.calls[0] != "wamid.ABC123" {
-		t.Errorf("dedupe calls = %v, want [wamid.ABC123]", dedupe.calls)
+	// The ledger keys on the digest, never the raw wamid (migration 00007).
+	if len(dedupe.calls) != 1 || dedupe.calls[0] != WaMessageIDDigest("wamid.ABC123") {
+		t.Errorf("dedupe calls = %v, want [%s]", dedupe.calls, WaMessageIDDigest("wamid.ABC123"))
 	}
 }
 
@@ -159,7 +160,7 @@ func TestWebhookPostInvalidSignatureRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dedupe := &stubDeduper{}
 			inbound := &stubInboundHandler{}
-			h := NewWebhookHandler(correctSecret, "verify-token", dedupe, inbound, nil)
+			h := NewWebhookHandler(correctSecret, "verify-token", "", dedupe, inbound, nil)
 
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
 			if sig != "" {
@@ -183,9 +184,9 @@ func TestWebhookPostInvalidSignatureRejected(t *testing.T) {
 
 func TestWebhookPostDuplicateSkipsHandler(t *testing.T) {
 	secret := "secret"
-	dedupe := &stubDeduper{first: map[string]bool{"wamid.DUP": false}}
+	dedupe := &stubDeduper{first: map[string]bool{WaMessageIDDigest("wamid.DUP"): false}}
 	inbound := &stubInboundHandler{}
-	h := NewWebhookHandler(secret, "verify-token", dedupe, inbound, nil)
+	h := NewWebhookHandler(secret, "verify-token", "", dedupe, inbound, nil)
 
 	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[{"from":"972500000000","id":"wamid.DUP","type":"text","text":{"body":"hi"}}]}}]}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
@@ -206,7 +207,7 @@ func TestWebhookPostMissingMessageIDDropped(t *testing.T) {
 	dedupe := &stubDeduper{}
 	inbound := &stubInboundHandler{}
 	logger, buf := newTestLogger()
-	h := NewWebhookHandler(secret, "verify-token", dedupe, inbound, logger)
+	h := NewWebhookHandler(secret, "verify-token", "", dedupe, inbound, logger)
 
 	// Authentic payload whose message has no "id" — malformed; must be dropped
 	// rather than deduped on the empty-string key.
@@ -234,7 +235,7 @@ func TestWebhookPostStatusesOnlyIgnored(t *testing.T) {
 	secret := "secret"
 	dedupe := &stubDeduper{}
 	inbound := &stubInboundHandler{}
-	h := NewWebhookHandler(secret, "verify-token", dedupe, inbound, nil)
+	h := NewWebhookHandler(secret, "verify-token", "", dedupe, inbound, nil)
 
 	body := []byte(`{"entry":[{"changes":[{"value":{"statuses":[{"id":"wamid.STATUS","status":"delivered"}]}}]}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
@@ -252,7 +253,7 @@ func TestWebhookPostStatusesOnlyIgnored(t *testing.T) {
 
 func TestWebhookPostUnparseableJSONStill200(t *testing.T) {
 	secret := "secret"
-	h := NewWebhookHandler(secret, "verify-token", &stubDeduper{}, &stubInboundHandler{}, nil)
+	h := NewWebhookHandler(secret, "verify-token", "", &stubDeduper{}, &stubInboundHandler{}, nil)
 
 	body := []byte(`not json {`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
@@ -268,7 +269,7 @@ func TestWebhookPostUnparseableJSONStill200(t *testing.T) {
 func TestWebhookPostNonTextMessageEmptyBody(t *testing.T) {
 	secret := "secret"
 	inbound := &stubInboundHandler{}
-	h := NewWebhookHandler(secret, "verify-token", &stubDeduper{}, inbound, nil)
+	h := NewWebhookHandler(secret, "verify-token", "", &stubDeduper{}, inbound, nil)
 
 	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[{"from":"972500000000","id":"wamid.IMG","type":"image"}]}}]}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
@@ -291,7 +292,7 @@ func TestWebhookPostNonTextMessageEmptyBody(t *testing.T) {
 func TestWebhookPostMultiMessageBatchInOrder(t *testing.T) {
 	secret := "secret"
 	inbound := &stubInboundHandler{}
-	h := NewWebhookHandler(secret, "verify-token", &stubDeduper{}, inbound, nil)
+	h := NewWebhookHandler(secret, "verify-token", "", &stubDeduper{}, inbound, nil)
 
 	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[
 		{"from":"972500000001","id":"wamid.ONE","type":"text","text":{"body":"one"}},
@@ -313,15 +314,21 @@ func TestWebhookPostMultiMessageBatchInOrder(t *testing.T) {
 func TestWebhookPostOversizedBodyRejected(t *testing.T) {
 	secret := "secret"
 	inbound := &stubInboundHandler{}
-	h := NewWebhookHandler(secret, "verify-token", &stubDeduper{}, inbound, nil)
+	h := NewWebhookHandler(secret, "verify-token", "", &stubDeduper{}, inbound, nil)
 
 	huge := bytes.Repeat([]byte("a"), 300*1024) // > 256 KiB cap
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(huge))
+	// Sign it. Without a signature the body cap and a missing header both
+	// produce a 4xx, so a range assertion could not tell them apart and the
+	// test passed with MaxBytesReader deleted (403 "missing header" instead of
+	// 400). A correctly signed body isolates the cap as the only reason to
+	// reject, and the status is asserted exactly.
+	req.Header.Set("X-Hub-Signature-256", sign(t, secret, huge))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if rec.Code < 400 || rec.Code >= 500 {
-		t.Errorf("status = %d, want 4xx", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (body cap); a 403 here means the cap is gone and the signature check rejected it instead", rec.Code)
 	}
 	if len(inbound.calls) != 0 {
 		t.Errorf("handler called on oversized body")
@@ -333,7 +340,7 @@ func TestWebhookPostDedupeFailureDegradesAndProcesses(t *testing.T) {
 	dedupe := &stubDeduper{err: errors.New("db down")}
 	inbound := &stubInboundHandler{}
 	logger, buf := newTestLogger()
-	h := NewWebhookHandler(secret, "verify-token", dedupe, inbound, logger)
+	h := NewWebhookHandler(secret, "verify-token", "", dedupe, inbound, logger)
 
 	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[{"from":"972500000000","id":"wamid.DBDOWN","type":"text","text":{"body":"hi"}}]}}]}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
@@ -355,10 +362,17 @@ func TestWebhookPostDedupeFailureDegradesAndProcesses(t *testing.T) {
 func TestWebhookPostLogsOnlyPhoneLast4(t *testing.T) {
 	secret := "secret"
 	logger, buf := newTestLogger()
-	h := NewWebhookHandler(secret, "verify-token", &stubDeduper{}, &stubInboundHandler{}, logger)
+	h := NewWebhookHandler(secret, "verify-token", "", &stubDeduper{}, &stubInboundHandler{}, logger)
 
 	from := "972501234567"
-	body := []byte(fmt.Sprintf(`{"entry":[{"changes":[{"value":{"messages":[{"from":"%s","id":"wamid.PHONE","type":"text","text":{"body":"hi"}}]}}]}]}`, from))
+	// leakyWamid (redact_test.go) reproduces the real wamid structure, with the
+	// sender's MSISDN base64-encoded in its leading segment. The original
+	// fixture here was the arbitrary string "wamid.PHONE", which encodes
+	// nothing — so reverting any of the WaMessageIDDigest call sites to the raw
+	// msg.WaMessageID left this test green. That is precisely the blind spot
+	// P7's postmortem identified ("invisible in synthetic test fixtures") and
+	// the fix originally shipped with it intact.
+	body := []byte(fmt.Sprintf(`{"entry":[{"changes":[{"value":{"messages":[{"from":"%s","id":"%s","type":"text","text":{"body":"hi"}}]}}]}]}`, from, leakyWamid))
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
 	req.Header.Set("X-Hub-Signature-256", sign(t, secret, body))
 	rec := httptest.NewRecorder()
@@ -368,7 +382,207 @@ func TestWebhookPostLogsOnlyPhoneLast4(t *testing.T) {
 	if strings.Contains(logs, from) {
 		t.Errorf("log output contains full phone number: %s", logs)
 	}
+	// The wamid must never reach the logs raw: its payload decodes to a full
+	// MSISDN, which neither PhoneLast4 nor RedactDigits can catch (the leak is
+	// base64, not a digit run).
+	if strings.Contains(logs, leakyWamid) {
+		t.Errorf("log output contains the raw wamid (phone recoverable via base64): %s", logs)
+	}
+	if strings.Contains(logs, syntheticMSISDNBase64) {
+		t.Errorf("log output contains the base64-encoded MSISDN segment: %s", logs)
+	}
+	if !strings.Contains(logs, WaMessageIDDigest(leakyWamid)) {
+		t.Errorf("log output missing the wamid digest: %s", logs)
+	}
 	if !strings.Contains(logs, PhoneLast4(from)) {
 		t.Errorf("log output missing phone_last4 %q: %s", PhoneLast4(from), logs)
+	}
+}
+
+// --- 2026-08-02 code-review regressions ---
+
+// panickingInboundHandler models story 2.2's real parser blowing up on a
+// hostile payload. The dedupe row is already committed when Handle runs.
+type panickingInboundHandler struct{ calls int }
+
+func (h *panickingInboundHandler) Handle(ctx context.Context, msg InboundMessage) {
+	h.calls++
+	panic("parser exploded on " + msg.From)
+}
+
+// A type mismatch in one message must not discard its well-formed siblings.
+// json.Unmarshal records the first UnmarshalTypeError and keeps decoding, so
+// the envelope is fully populated; returning early threw the whole batch away —
+// and because an authentic payload always gets a 200, Meta never redelivers it.
+func TestWebhookPostPartialDecodeKeepsValidMessages(t *testing.T) {
+	secret := "secret"
+	inbound := &stubInboundHandler{}
+	logger, buf := newTestLogger()
+	h := NewWebhookHandler(secret, "verify-token", "", &stubDeduper{}, inbound, logger)
+
+	// The middle message declares text as a string where an object is expected.
+	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[
+		{"from":"972500000001","id":"wamid.GOOD1","type":"text","text":{"body":"one"}},
+		{"from":"972500000002","id":"wamid.BAD","type":"text","text":"not an object"},
+		{"from":"972500000003","id":"wamid.GOOD2","type":"text","text":{"body":"three"}}
+	]}}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sign(t, secret, body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(inbound.calls) != 3 {
+		t.Fatalf("handler called %d times, want 3 (the bad message decodes to zero values, its siblings intact)", len(inbound.calls))
+	}
+	if inbound.calls[0].TextBody != "one" || inbound.calls[2].TextBody != "three" {
+		t.Errorf("well-formed siblings lost their bodies: %q / %q", inbound.calls[0].TextBody, inbound.calls[2].TextBody)
+	}
+	if !strings.Contains(buf.String(), "partially decoded") {
+		t.Errorf("expected a partial-decode WARN, got: %s", buf.String())
+	}
+}
+
+// A valid HMAC proves only that the app-secret holder signed the body; the
+// secret is app-scoped, so any number subscribed to the app verifies.
+func TestWebhookPostForeignPhoneNumberIDDropped(t *testing.T) {
+	secret := "secret"
+	dedupe := &stubDeduper{}
+	inbound := &stubInboundHandler{}
+	logger, buf := newTestLogger()
+	h := NewWebhookHandler(secret, "verify-token", "ours-123", dedupe, inbound, logger)
+
+	body := []byte(`{"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"someone-else-456"},"messages":[{"from":"972500000000","id":"wamid.FOREIGN","type":"text","text":{"body":"hi"}}]}}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sign(t, secret, body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	// 200, not 403: the payload is authentically Meta, just not for us. A 403
+	// would drive Meta's multi-day retry backoff.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(inbound.calls) != 0 || len(dedupe.calls) != 0 {
+		t.Errorf("foreign-number message processed: handler=%d dedupe=%d", len(inbound.calls), len(dedupe.calls))
+	}
+	if !strings.Contains(buf.String(), "another phone number") {
+		t.Errorf("expected a foreign-number WARN, got: %s", buf.String())
+	}
+}
+
+func TestWebhookPostOwnPhoneNumberIDProcessed(t *testing.T) {
+	secret := "secret"
+	inbound := &stubInboundHandler{}
+	h := NewWebhookHandler(secret, "verify-token", "ours-123", &stubDeduper{}, inbound, nil)
+
+	body := []byte(`{"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"ours-123"},"messages":[{"from":"972500000000","id":"wamid.MINE","type":"text","text":{"body":"hi"}}]}}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sign(t, secret, body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || len(inbound.calls) != 1 {
+		t.Fatalf("own-number message not processed: status=%d handler=%d", rec.Code, len(inbound.calls))
+	}
+}
+
+// Without the recover, the panic unwinds to net/http's per-connection recover:
+// no 200 is written, Meta retries, and the retry is skipped as a duplicate
+// because the ledger row was already committed — permanent loss logged as
+// healthy behaviour.
+func TestWebhookPostHandlerPanicContained(t *testing.T) {
+	secret := "secret"
+	dedupe := &stubDeduper{}
+	inbound := &panickingInboundHandler{}
+	logger, buf := newTestLogger()
+	h := NewWebhookHandler(secret, "verify-token", "", dedupe, inbound, logger)
+
+	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[{"from":"972500000000","id":"wamid.BOOM","type":"text","text":{"body":"hi"}}]}}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sign(t, secret, body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req) // must not panic out of the handler
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (Meta must still be acknowledged)", rec.Code)
+	}
+	if inbound.calls != 1 {
+		t.Fatalf("handler called %d times, want 1", inbound.calls)
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "inbound handler panicked") {
+		t.Errorf("panic not logged: %s", logs)
+	}
+	if strings.Contains(logs, "inbound message accepted") {
+		t.Errorf("a panicked message must not be logged as accepted: %s", logs)
+	}
+	if strings.Contains(logs, "972500000000") {
+		t.Errorf("panic log leaked the full phone number: %s", logs)
+	}
+}
+
+// A dropped connection must not turn into silent duplicate processing: the
+// dedupe INSERT is detached from the request context, so the ledger row is
+// written even though the client is gone, and Meta's retry is deduped.
+func TestWebhookPostSurvivesClientDisconnect(t *testing.T) {
+	secret := "secret"
+	dedupe := &stubDeduper{}
+	inbound := &stubInboundHandler{}
+	logger, buf := newTestLogger()
+	h := NewWebhookHandler(secret, "verify-token", "", dedupe, inbound, logger)
+
+	body := []byte(`{"entry":[{"changes":[{"value":{"messages":[{"from":"972500000000","id":"wamid.GONE","type":"text","text":{"body":"hi"}}]}}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/whatsapp", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sign(t, secret, body))
+
+	// Simulate the client hanging up before the handler processes the payload.
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if len(dedupe.calls) != 1 {
+		t.Fatalf("dedupe called %d times, want 1 — a cancelled request context must not skip the ledger write", len(dedupe.calls))
+	}
+	if len(inbound.calls) != 1 {
+		t.Fatalf("handler called %d times, want 1", len(inbound.calls))
+	}
+	if strings.Contains(buf.String(), "dedupe_degraded") {
+		t.Errorf("disconnect misreported as a dedupe degradation: %s", buf.String())
+	}
+}
+
+// The handshake is re-run on a fresh tunnel URL every dev session and is the
+// most common setup failure; a silent 403 leaves the operator no signal.
+func TestWebhookGetHandshakeRejectionLogsReason(t *testing.T) {
+	tests := []struct {
+		name, query, wantReason string
+	}{
+		{"wrong token", "?hub.mode=subscribe&hub.verify_token=nope&hub.challenge=c", "verify token mismatch"},
+		{"wrong mode", "?hub.mode=unsubscribe&hub.verify_token=verify-token&hub.challenge=c", "unexpected hub.mode"},
+		{"missing challenge", "?hub.mode=subscribe&hub.verify_token=verify-token", "missing hub.challenge"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logger, buf := newTestLogger()
+			h := NewWebhookHandler("secret", "verify-token", "", &stubDeduper{}, &stubInboundHandler{}, logger)
+
+			req := httptest.NewRequest(http.MethodGet, "/webhooks/whatsapp"+tc.query, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403", rec.Code)
+			}
+			if !strings.Contains(buf.String(), tc.wantReason) {
+				t.Errorf("log missing reason %q: %s", tc.wantReason, buf.String())
+			}
+		})
 	}
 }
