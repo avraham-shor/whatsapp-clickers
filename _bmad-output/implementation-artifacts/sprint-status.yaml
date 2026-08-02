@@ -54,7 +54,7 @@ development_status:
   # Epic 2: WhatsApp Front Door — Registration & Inbox
   epic-2: in-progress
   2-1-whatsapp-webhook-intake-and-outbound-dispatch: done
-  2-2-universal-reply-the-chat-never-goes-silent: ready-for-dev
+  2-2-universal-reply-the-chat-never-goes-silent: done
   2-3-open-the-lobby-and-watch-it-live: backlog
   2-4-join-the-game-with-one-whatsapp-message: backlog
   2-5-late-join-becomes-spectator: backlog

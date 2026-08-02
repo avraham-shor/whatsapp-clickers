@@ -32,6 +32,37 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./...
+      - name: Hebrew copy centralization
+        # Every outbound WhatsApp string lives in internal/wa/messages_he.go
+        # (architecture Enforcement Guidelines) — a Hebrew literal in a handler
+        # is a named anti-pattern. Test files are exempt: they legitimately
+        # assert on Hebrew fixtures.
+        run: |
+          # grep -P rejects the codepoint range under a non-UTF-8 locale
+          # ("-P supports only unibyte and UTF-8 locales"), which the status
+          # guard below would turn into a red build rather than a silent pass.
+          export LC_ALL=C.UTF-8
+          status=0
+          # U+0590-05FF is the Hebrew block; U+FB1D-FB4F the Alphabetic
+          # Presentation Forms (precomposed ligatures, e.g. pasted from a
+          # PDF) — copy smuggled in that form must not evade the gate.
+          hebrew=$(grep -rlP '[\x{0590}-\x{05FF}\x{FB1D}-\x{FB4F}]' --include='*.go' .) || status=$?
+          if [ "$status" -gt 1 ]; then
+            echo "copy-centralization: grep error (exit $status)"
+            exit "$status"
+          fi
+          # The exemption is anchored to the one real path (grep -rl on .
+          # prints ./-prefixed paths) so a future file merely *ending* in
+          # internal/wa/messages_he.go is not silently exempt too.
+          matches=$(printf '%s\n' "$hebrew" \
+            | grep -v '^$' \
+            | grep -v '_test\.go$' \
+            | grep -v '^\./internal/wa/messages_he\.go$') || true
+          if [ -z "$matches" ]; then echo "copy-centralization: clean"; exit 0; fi
+          echo "Hebrew literals outside internal/wa/messages_he.go (copy-centralization violation):"
+          echo "$matches"
+          exit 1
+
       - name: sqlc generate diff-check
         run: |
           go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1

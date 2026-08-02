@@ -284,6 +284,44 @@ func TestLoadTrimsWhitespaceFromValues(t *testing.T) {
 	}
 }
 
+// WHATSAPP_API_BASE_URL is the one optional WhatsApp variable: unset must
+// boot cleanly and leave the client's pinned default in force.
+func TestLoadAPIBaseURLUnsetIsEmpty(t *testing.T) {
+	cfg, err := load(lookupFromMap(fullEnv()))
+	if err != nil {
+		t.Fatalf("load() returned error without WHATSAPP_API_BASE_URL: %v", err)
+	}
+	if cfg.WhatsAppAPIBaseURL != "" {
+		t.Errorf("WhatsAppAPIBaseURL = %q, want empty when unset", cfg.WhatsAppAPIBaseURL)
+	}
+}
+
+func TestLoadAPIBaseURLCarriedThrough(t *testing.T) {
+	env := fullEnv()
+	env["WHATSAPP_API_BASE_URL"] = "  http://127.0.0.1:9099/v25.0\r\n"
+	cfg, err := load(lookupFromMap(env))
+	if err != nil {
+		t.Fatalf("load() returned error: %v", err)
+	}
+	if cfg.WhatsAppAPIBaseURL != "http://127.0.0.1:9099/v25.0" {
+		t.Errorf("WhatsAppAPIBaseURL = %q, want the trimmed override", cfg.WhatsAppAPIBaseURL)
+	}
+}
+
+// The override is deliberately exempt from placeholder validation — it is a
+// test-harness knob, not a secret.
+func TestLoadAPIBaseURLNotPlaceholderValidated(t *testing.T) {
+	env := fullEnv()
+	env["WHATSAPP_API_BASE_URL"] = "dummy"
+	cfg, err := load(lookupFromMap(env))
+	if err != nil {
+		t.Fatalf("load() rejected a non-secret override value: %v", err)
+	}
+	if cfg.WhatsAppAPIBaseURL != "dummy" {
+		t.Errorf("WhatsAppAPIBaseURL = %q, want %q", cfg.WhatsAppAPIBaseURL, "dummy")
+	}
+}
+
 // A whitespace-only value is as absent as an empty one.
 func TestLoadWhitespaceOnlyValueCountsAsMissing(t *testing.T) {
 	env := fullEnv()

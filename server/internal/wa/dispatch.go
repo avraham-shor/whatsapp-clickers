@@ -3,6 +3,7 @@ package wa
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,10 @@ const (
 	// message (not retries-after-the-first): 3 attempts, 2 backoff waits
 	// between them (dispatchBackoff below).
 	dispatchMaxAttempts = 3
+	// drainPollInterval is how often Drain re-checks the queue depth. Short
+	// enough that a shutdown drain costs no perceptible time, long enough
+	// that the poll itself is free.
+	drainPollInterval = 50 * time.Millisecond
 )
 
 // dispatchBackoff holds the wait between attempts 1->2 and 2->3. Only two
@@ -105,6 +110,20 @@ func contextSleep(ctx context.Context, d time.Duration) {
 // drops the message with a WARN log (NFR-2) rather than backing up the
 // caller — at pilot scale this fires only under pathology.
 func (d *Dispatcher) Enqueue(to, body string) {
+	// An unsendable message must not reach the queue: Meta rejects it, so it
+	// would burn all dispatchMaxAttempts plus the full backoff table and one
+	// rate token per attempt before the permanent-failure WARN — capacity
+	// spent at exactly the moment a real burst needs it. Whitespace-only
+	// counts as missing (Meta rejects it just the same); the payload itself
+	// is enqueued untrimmed.
+	if strings.TrimSpace(to) == "" || strings.TrimSpace(body) == "" {
+		d.logger.Warn("outbound message missing recipient or body, dropped",
+			"phone_last4", PhoneLast4(to),
+			"has_recipient", to != "",
+			"has_body", body != "")
+		return
+	}
+
 	select {
 	case d.queue <- outboundMessage{to: to, body: body}:
 	default:
@@ -143,6 +162,29 @@ func (d *Dispatcher) Run(ctx context.Context) {
 				d.logger.Warn("dispatcher shut down with unsent messages", "dropped_count", dropped)
 			}
 			return
+		}
+	}
+}
+
+// Drain blocks until the queue is empty or ctx is done. The shutdown sequence
+// calls it after srv.Shutdown returns — at which point every handler has
+// finished, so everything they queued is already in the queue — and before
+// cancelling the dispatcher's own context.
+//
+// Known limit: an empty queue means nothing is *waiting*, not that in-flight
+// sends have landed. Those are bounded by the client's per-request timeout and
+// by whatever grace the caller allows after Drain returns.
+func (d *Dispatcher) Drain(ctx context.Context) {
+	ticker := time.NewTicker(drainPollInterval)
+	defer ticker.Stop()
+	for {
+		if len(d.queue) == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

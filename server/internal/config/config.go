@@ -16,8 +16,14 @@ type Config struct {
 	WhatsAppPhoneNumberID string
 	WhatsAppAppSecret     string
 	WhatsAppVerifyToken   string
-	AnthropicAPIKey       string
-	SessionSecret         string
+	// WhatsAppAPIBaseURL overrides the Cloud API base URL. OPTIONAL and empty
+	// in production, where the client's pinned default is what we want; it
+	// exists so an E2E harness can point the server at a local fake provider
+	// and assert that replies are actually *sent*, not merely that the webhook
+	// returned 200. Neither required nor placeholder-validated.
+	WhatsAppAPIBaseURL string
+	AnthropicAPIKey    string
+	SessionSecret      string
 }
 
 const defaultPort = "8080"
@@ -73,6 +79,12 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 	cfg.Port = defaultPort
 	if port, ok := lookup("PORT"); ok && port != "" {
 		cfg.Port = port
+	}
+
+	// Optional: unset means "use the client's pinned default". Trimmed like
+	// every other value so a CRLF-authored .env cannot smuggle a \r into a URL.
+	if baseURL, ok := lookup("WHATSAPP_API_BASE_URL"); ok {
+		cfg.WhatsAppAPIBaseURL = strings.TrimSpace(baseURL)
 	}
 	return cfg, nil
 }

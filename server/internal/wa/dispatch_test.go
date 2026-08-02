@@ -234,6 +234,99 @@ func TestDispatcherRetriesThenSucceeds(t *testing.T) {
 	}
 }
 
+// TestDispatcherEmptyArgsDropped closes the 2.1 deferred item whose revisit
+// trigger was "2.2's first Enqueue caller". Without the guard an empty
+// recipient burns 3 attempts, 1s+2s of backoff and 3 rate tokens per message
+// before the permanent-failure WARN.
+func TestDispatcherEmptyArgsDropped(t *testing.T) {
+	cases := map[string]struct{ to, body string }{
+		"empty recipient": {"", "some body"},
+		"empty body":      {"972500000001", ""},
+		"both empty":      {"", ""},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			sender := &stubSender{failUntilAttempt: -1}
+			d, buf := newTestDispatcher(t, sender)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			runDone := make(chan struct{})
+			go func() {
+				d.Run(ctx)
+				close(runDone)
+			}()
+
+			d.Enqueue(tc.to, tc.body)
+			waitForLogContains(t, buf, "outbound message missing recipient or body, dropped")
+			cancel()
+			<-runDone
+
+			if got := sender.callCount(); got != 0 {
+				t.Errorf("SendText called %d times for an unsendable message, want 0", got)
+			}
+			if len(d.queue) != 0 {
+				t.Errorf("queue length = %d, want 0 (dropped before enqueue)", len(d.queue))
+			}
+		})
+	}
+}
+
+func TestDispatcherDrainReturnsWhenQueueEmpties(t *testing.T) {
+	sender := &stubSender{failUntilAttempt: -1}
+	d, _ := newTestDispatcher(t, sender)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		d.Run(ctx)
+		close(runDone)
+	}()
+
+	d.Enqueue("972500000001", "one")
+	d.Enqueue("972500000002", "two")
+
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer drainCancel()
+	d.Drain(drainCtx)
+
+	if err := drainCtx.Err(); err != nil {
+		t.Fatalf("Drain returned because its context expired (%v), not because the queue emptied", err)
+	}
+	if len(d.queue) != 0 {
+		t.Errorf("queue length = %d after Drain, want 0", len(d.queue))
+	}
+
+	cancel()
+	<-runDone
+}
+
+func TestDispatcherDrainReturnsOnContextExpiry(t *testing.T) {
+	sender := &stubSender{failUntilAttempt: -1}
+	d, _ := newTestDispatcher(t, sender)
+	// Run is never called, so nothing drains the queue — Drain must give up
+	// on its context rather than block the shutdown sequence forever.
+	d.Enqueue("972500000001", "never sent")
+
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer drainCancel()
+
+	done := make(chan struct{})
+	go func() {
+		d.Drain(drainCtx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Drain did not return after its context expired")
+	}
+	if len(d.queue) != 1 {
+		t.Errorf("queue length = %d, want 1 (nothing drained it)", len(d.queue))
+	}
+}
+
 func TestDispatcherContextCancelStopsWorkers(t *testing.T) {
 	sender := &stubSender{failUntilAttempt: -1}
 	d, _ := newTestDispatcher(t, sender)

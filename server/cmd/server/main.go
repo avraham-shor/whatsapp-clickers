@@ -22,16 +22,22 @@ import (
 	"github.com/avraham-shor/whatsapp-clickers/migrations"
 )
 
-// stubInboundHandler is the 2.1 placeholder wa.InboundHandler: it only
-// logs. Story 2.2 replaces it with the real message router/parser.
-type stubInboundHandler struct {
-	logger *slog.Logger
-}
-
-func (h stubInboundHandler) Handle(ctx context.Context, msg wa.InboundMessage) {
-	h.logger.Info("inbound message received (no handler yet)",
-		"wa_message_id", wa.WaMessageIDDigest(msg.WaMessageID), "type", msg.Type, "phone_last4", wa.PhoneLast4(msg.From))
-}
+const (
+	// httpShutdownTimeout bounds draining in-flight HTTP requests.
+	httpShutdownTimeout = 15 * time.Second
+	// dispatcherDrainTimeout bounds emptying the outbound queue AFTER the HTTP
+	// server has stopped — by then every handler has returned, so everything
+	// they queued is already in the queue.
+	dispatcherDrainTimeout = 5 * time.Second
+	// dispatcherStopGrace lets Run return after its context is cancelled, so
+	// its "shut down with unsent messages" summary WARN reaches the log before
+	// the process exits. The three sum to a 22s worst case — and Railway's
+	// default SIGTERM→SIGKILL grace is ZERO seconds, so none of this runs on
+	// a redeploy unless RAILWAY_DEPLOYMENT_DRAINING_SECONDS is set on the
+	// service to at least that worst case (30 leaves margin). See
+	// .env.example for the ops note.
+	dispatcherStopGrace = 2 * time.Second
+)
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -78,11 +84,33 @@ func run(logger *slog.Logger) error {
 	st := store.New(pool)
 	authSvc := auth.NewService(st, cfg.SessionSecret)
 
-	waClient := wa.NewClient(cfg.WhatsAppAccessToken, cfg.WhatsAppPhoneNumberID)
+	var clientOpts []wa.ClientOption
+	if cfg.WhatsAppAPIBaseURL != "" {
+		// Test-harness only: points the client at a local fake provider so an
+		// E2E run can assert replies are actually sent. Unset in production.
+		logger.Info("WhatsApp API base URL overridden", "base_url", cfg.WhatsAppAPIBaseURL)
+		clientOpts = append(clientOpts, wa.WithBaseURL(cfg.WhatsAppAPIBaseURL))
+	}
+	waClient := wa.NewClient(cfg.WhatsAppAccessToken, cfg.WhatsAppPhoneNumberID, clientOpts...)
 	dispatcher := wa.NewDispatcher(waClient, logger)
-	go dispatcher.Run(ctx)
+
+	// The dispatcher runs on its own context, NOT the signal context: on
+	// SIGTERM, srv.Shutdown keeps serving in-flight webhook requests for up to
+	// httpShutdownTimeout, and every reply those requests enqueue needs a live
+	// worker pool to pick it up. Sharing ctx would stop the workers first and
+	// swallow the queue with no drop log at all — "the chat goes silent on
+	// redeploy", which is every merge to main.
+	dispatchCtx, stopDispatcher := context.WithCancel(context.Background())
+	defer stopDispatcher()
+	dispatcherDone := make(chan struct{})
+	go func() {
+		defer close(dispatcherDone)
+		dispatcher.Run(dispatchCtx)
+	}()
+
+	inboundRouter := wa.NewInboundRouter(dispatcher, logger)
 	// st satisfies Deduper directly (MarkWaMessageProcessed).
-	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, cfg.WhatsAppPhoneNumberID, st, stubInboundHandler{logger: logger}, logger)
+	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, cfg.WhatsAppPhoneNumberID, st, inboundRouter, logger)
 
 	// st satisfies both Pinger and GameStore.
 	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler)
@@ -102,20 +130,54 @@ func run(logger *slog.Logger) error {
 	go func() { errCh <- srv.ListenAndServe() }()
 	logger.Info("server listening", "port", cfg.Port)
 
+	// drainAndStop is the dispatcher teardown for EVERY exit from run, not
+	// just the clean one: drain the queue, stop the workers, wait for Run so
+	// its unsent-message summary WARN is logged rather than lost to process
+	// exit. The error paths need it most — they fire when handlers were
+	// still busy (Shutdown timeout) or the listener died, which is exactly
+	// when the queue is fullest; skipping it there would silently discard
+	// every queued reply, the failure mode this wiring exists to prevent.
+	// On paths where handlers may still be running, the drain is best-effort
+	// and bounded by dispatcherDrainTimeout. Returns true when the
+	// dispatcher stopped within its grace.
+	drainAndStop := func() bool {
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), dispatcherDrainTimeout)
+		dispatcher.Drain(drainCtx)
+		cancelDrain()
+		stopDispatcher()
+		select {
+		case <-dispatcherDone:
+			return true
+		case <-time.After(dispatcherStopGrace):
+			logger.Warn("dispatcher did not stop within the shutdown grace")
+			return false
+		}
+	}
+
 	select {
 	case err := <-errCh:
+		drainAndStop()
 		return err
 	case <-ctx.Done():
 		logger.Info("shutdown signal received, draining")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
+			drainAndStop()
 			return err
 		}
 		if err := <-errCh; !errors.Is(err, http.ErrServerClosed) {
+			drainAndStop()
 			return err
 		}
-		logger.Info("server stopped cleanly")
+
+		// Every handler has returned, so the queue now holds everything
+		// they enqueued; this drain is the complete one, and only a clean
+		// dispatcher join earns the all-clear line — log-based alerting
+		// must never see a warning and an all-clear for the same shutdown.
+		if drainAndStop() {
+			logger.Info("server stopped cleanly")
+		}
 		return nil
 	}
 }
