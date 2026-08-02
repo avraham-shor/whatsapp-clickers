@@ -35,6 +35,27 @@ func TestRedactDigits(t *testing.T) {
 	}
 }
 
+// P6 originally matched only contiguous digit runs, so a number Meta echoed
+// back in any human-formatted shape passed straight through into the
+// dispatcher's WARN logs (NFR-4). Meta's error.message is an uncontrolled
+// external string; its formatting is not contractual.
+func TestRedactDigitsSeparatorFormattedNumbers(t *testing.T) {
+	for _, in := range []string{
+		"Recipient +972 50 123 4567 is not in the allowed list",
+		"Recipient 972-50-123-4567 rejected",
+		"Recipient (972) 50.123.4567 rejected",
+		"Recipient +972501234567 rejected",
+	} {
+		got := RedactDigits(in)
+		if strings.Contains(got, "4567") {
+			t.Errorf("RedactDigits(%q) = %q — recipient digits survived redaction", in, got)
+		}
+		if !strings.Contains(got, "[redacted]") {
+			t.Errorf("RedactDigits(%q) = %q — nothing was redacted", in, got)
+		}
+	}
+}
+
 // leakyWamid mirrors the structure of a real wamid captured from a live Meta
 // delivery on 2026-07-30 — "wamid." + base64(MSISDN) + base64(message uuid) —
 // but encodes the reserved test number 972500000000 rather than anyone's real

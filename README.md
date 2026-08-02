@@ -207,8 +207,8 @@ tier messaging limits, so the ≈₪0 assumption holds).
    Customize*. Both are reachable directly, substituting your app ID:
    `https://developers.facebook.com/apps/<APP_ID>/whatsapp-business/wa-settings/`
    (Configuration) and `.../wa-dev-console/` (API Setup). If you have a token
-   but not the app ID, `GET /v25.0/debug_token?input_token=<TOKEN>&access_token=<TOKEN>`
-   returns it.
+   but not the app ID, `GET /v25.0/debug_token?input_token=<TOKEN>` with the
+   token in an `Authorization: Bearer` header returns it.
 7. ⚠️ **Subscribe the app to the WABA** — the step the console does *not*
    do for you, and the one silent enough to cost an afternoon. Completing
    step 6 stores the callback URL against your app, but the WhatsApp
@@ -219,9 +219,16 @@ tier messaging limits, so the ≈₪0 assumption holds).
    Verify and fix over the API (system-user token):
 
    ```sh
+   # Pass the token in the header, never as ?access_token= — a query string
+   # lands in shell history, proxy logs and terminal scrollback, and this is a
+   # never-expiring system-user token.
+   export WA_TOKEN='<TOKEN>'
+
    # Should list YOUR app; if it only lists WA DevX, POST to subscribe.
-   curl "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps?access_token=<TOKEN>"
-   curl -X POST "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps?access_token=<TOKEN>"
+   curl -H "Authorization: Bearer $WA_TOKEN" \
+     "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps"
+   curl -X POST -H "Authorization: Bearer $WA_TOKEN" \
+     "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps"
    ```
 
    Both apps may stay subscribed side by side — adding yours removes nothing.

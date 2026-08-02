@@ -7,6 +7,8 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,12 +26,19 @@ const maxWebhookBodyBytes = 256 * 1024
 // the 5s deadline every httpapi DB handler already imposes.
 const dedupeDBTimeout = 5 * time.Second
 
+// payloadBudget bounds the whole POST handler, not one message. dedupeDBTimeout
+// alone is per-message, so a degraded Postgres plus a multi-message batch could
+// hold the goroutine for N*5s — past Meta's response window, which produces the
+// retry storm the 200-always design exists to avoid. Sized to stay inside the
+// server's 30s WriteTimeout with room for the response write.
+const payloadBudget = 20 * time.Second
+
 // InboundMessage is the normalized shape every wa consumer works with,
 // independent of Meta's webhook envelope.
 type InboundMessage struct {
 	WaMessageID string
 	From        string // E.164 digits, no leading "+" (Meta's messages[].from)
-	ProfileName string // empty when Meta omits the parallel contacts[] entry
+	ProfileName string // pushname; empty when contacts[] is absent OR no wa_id matches From
 	Type        string // Meta's messages[].type verbatim: "text", "image", "sticker", ...
 	TextBody    string // text.body for Type=="text"; empty otherwise
 	ReceivedAt  time.Time
@@ -50,26 +59,34 @@ type InboundHandler interface {
 // webhookHandler serves both the GET registration handshake and the POST
 // inbound delivery on the same mount point.
 type webhookHandler struct {
-	appSecret   string
-	verifyToken string
-	dedupe      Deduper
-	inbound     InboundHandler
-	logger      *slog.Logger
+	appSecret     string
+	verifyToken   string
+	phoneNumberID string
+	dedupe        Deduper
+	inbound       InboundHandler
+	logger        *slog.Logger
 }
 
 // NewWebhookHandler builds the /webhooks/whatsapp handler. logger may be
 // nil, in which case slog.Default() is used — pass a logger built on
 // slog.NewTextHandler(buf, nil) in tests to assert on WARN/redaction.
-func NewWebhookHandler(appSecret, verifyToken string, dedupe Deduper, inbound InboundHandler, logger *slog.Logger) http.Handler {
+//
+// phoneNumberID is our own business phone number ID. A valid HMAC only proves
+// the app-secret holder signed the body, and the app secret is app-scoped, not
+// number-scoped: every phone number subscribed to this Meta app produces
+// payloads that verify. Messages whose value.metadata.phone_number_id names a
+// different number are dropped. Empty disables the check.
+func NewWebhookHandler(appSecret, verifyToken, phoneNumberID string, dedupe Deduper, inbound InboundHandler, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &webhookHandler{
-		appSecret:   appSecret,
-		verifyToken: verifyToken,
-		dedupe:      dedupe,
-		inbound:     inbound,
-		logger:      logger,
+		appSecret:     appSecret,
+		verifyToken:   verifyToken,
+		phoneNumberID: phoneNumberID,
+		dedupe:        dedupe,
+		inbound:       inbound,
+		logger:        logger,
 	}
 }
 
@@ -91,8 +108,21 @@ func (h *webhookHandler) handleVerify(w http.ResponseWriter, r *http.Request) {
 	token := q.Get("hub.verify_token")
 	challenge := q.Get("hub.challenge")
 
+	// Every rejection is logged with a reason. This handshake is re-run on a
+	// fresh quick-tunnel URL each dev session and is the single most common
+	// setup failure; without a log line the operator cannot tell "never
+	// arrived" from "wrong token" from "wrong mode".
 	tokenMatches := subtle.ConstantTimeCompare([]byte(token), []byte(h.verifyToken)) == 1
-	if mode == "subscribe" && tokenMatches {
+	switch {
+	case mode != "subscribe":
+		h.logger.Warn("verify handshake rejected", "reason", "unexpected hub.mode")
+	case !tokenMatches:
+		h.logger.Warn("verify handshake rejected", "reason", "verify token mismatch")
+	case challenge == "":
+		// Echoing an empty challenge yields a 200 that Meta still rejects,
+		// with nothing in the log to explain it.
+		h.logger.Warn("verify handshake rejected", "reason", "missing hub.challenge")
+	default:
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(challenge))
@@ -121,7 +151,16 @@ func (h *webhookHandler) handleInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.processPayload(r.Context(), body)
+	// Detach from the request context before processing. The body is read and
+	// verified, and Meta gets its 200 either way — a client disconnect or a
+	// fired WriteTimeout must not abort work already accepted. Left attached,
+	// a dropped connection makes the dedupe INSERT fail with context.Canceled,
+	// which the fail-open branch below would process anyway without writing a
+	// ledger row: Meta's retry would then be processed a second time, defeating
+	// AC-3 via a transient disconnect rather than a DB outage.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), payloadBudget)
+	defer cancel()
+	h.processPayload(ctx, body)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -163,11 +202,18 @@ type metaChange struct {
 }
 
 type metaValue struct {
+	Metadata metaMetadata  `json:"metadata"`
 	Contacts []metaContact `json:"contacts"`
 	Messages []metaMessage `json:"messages"`
 	// Statuses (delivery receipts) and any other field are intentionally
 	// not modeled — json.Unmarshal ignores unknown keys, and we silently
 	// acknowledge them (no messages means nothing to process).
+}
+
+// metaMetadata carries the business number the change was delivered for.
+// PhoneNumberID is Meta's opaque per-number identifier, not an MSISDN.
+type metaMetadata struct {
+	PhoneNumberID string `json:"phone_number_id"`
 }
 
 type metaContact struct {
@@ -192,16 +238,54 @@ type metaMessage struct {
 func (h *webhookHandler) processPayload(ctx context.Context, body []byte) {
 	var envelope metaEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		h.logger.Warn("webhook payload unparseable", "error", err.Error())
-		return
+		// json.Unmarshal does not abort on a type mismatch: it records the
+		// first one, keeps decoding, and returns it with the envelope fully
+		// populated. Returning here would throw away every well-formed message
+		// in the batch — and since an authentic payload always gets a 200,
+		// Meta would never redeliver them. One unmodeled field in a future
+		// Graph API version would silently blackhole all inbound traffic while
+		// the endpoint reported healthy.
+		var typeErr *json.UnmarshalTypeError
+		if !errors.As(err, &typeErr) {
+			h.logger.Warn("webhook payload unparseable", "error", err.Error())
+			return
+		}
+		h.logger.Warn("webhook payload partially decoded, processing valid messages",
+			"error", err.Error(), "field", typeErr.Field)
 	}
 	for _, entry := range envelope.Entry {
 		for _, change := range entry.Changes {
+			if !h.numberMatches(change.Value.Metadata.PhoneNumberID) {
+				h.logger.Warn("webhook change for another phone number, dropped",
+					"meta_number_id", change.Value.Metadata.PhoneNumberID,
+					"messages", len(change.Value.Messages))
+				continue
+			}
 			for _, m := range change.Value.Messages {
+				if err := ctx.Err(); err != nil {
+					// The payload budget is spent (a degraded DB burning
+					// dedupeDBTimeout per message gets here). Stop rather than
+					// run past Meta's response window; unprocessed messages
+					// have no ledger row, so the retry picks them up.
+					h.logger.Warn("payload budget exhausted, remaining messages left for retry",
+						"error", err.Error())
+					return
+				}
 				h.processMessage(ctx, change.Value.Contacts, m)
 			}
 		}
 	}
+}
+
+// numberMatches reports whether a change was delivered for our own business
+// number. A valid HMAC proves only that the app-secret holder signed the body,
+// and the app secret is app-scoped: any number subscribed to this Meta app
+// verifies. An empty configured ID disables the check.
+func (h *webhookHandler) numberMatches(deliveredFor string) bool {
+	if h.phoneNumberID == "" || deliveredFor == "" {
+		return true
+	}
+	return deliveredFor == h.phoneNumberID
 }
 
 func (h *webhookHandler) processMessage(ctx context.Context, contacts []metaContact, m metaMessage) {
@@ -226,9 +310,13 @@ func (h *webhookHandler) processMessage(ctx context.Context, contacts []metaCont
 		return
 	}
 
+	// The ledger keys on the digest, never the raw wamid: a wamid base64-encodes
+	// the sender's MSISDN, so storing it raw kept a recoverable phone number at
+	// rest indefinitely (migration 00007). Dedupe semantics are unchanged — the
+	// value is only ever compared for equality.
 	dbCtx, cancel := context.WithTimeout(ctx, dedupeDBTimeout)
 	defer cancel()
-	first, err := h.dedupe.MarkWaMessageProcessed(dbCtx, msg.WaMessageID)
+	first, err := h.dedupe.MarkWaMessageProcessed(dbCtx, WaMessageIDDigest(msg.WaMessageID))
 	switch {
 	case err != nil:
 		// A DB blip must not silence the chat: process anyway (SM-C2
@@ -241,11 +329,43 @@ func (h *webhookHandler) processMessage(ctx context.Context, contacts []metaCont
 		return
 	}
 
-	h.inbound.Handle(ctx, msg)
+	if !h.callHandler(ctx, msg) {
+		return
+	}
 	h.logger.Info("inbound message accepted",
 		"wa_message_id", WaMessageIDDigest(msg.WaMessageID), "type", msg.Type, "phone_last4", PhoneLast4(msg.From))
 }
 
+// callHandler invokes the inbound handler, containing any panic it raises.
+// It reports whether the handler returned normally.
+//
+// The ledger row is committed before this call (dedupe-before-handler is a
+// locked decision), and the repo has no panic-recovery middleware. Without
+// this guard a panic unwinds to net/http's per-connection recover: the 200 is
+// never written, Meta retries, the retry finds the wamid already recorded and
+// logs "duplicate webhook delivery skipped" at INFO — the message is lost
+// permanently and the only evidence reads as healthy. The panic also never
+// reaches slog, so NFR-8 observability shows nothing. Story 2.2 replaces the
+// stub handler with a real parser on this exact seam.
+func (h *webhookHandler) callHandler(ctx context.Context, msg InboundMessage) (ok bool) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			h.logger.Warn("inbound handler panicked, message dropped",
+				"wa_message_id", WaMessageIDDigest(msg.WaMessageID),
+				"type", msg.Type,
+				"phone_last4", PhoneLast4(msg.From),
+				"panic", RedactDigits(fmt.Sprint(rec)))
+			ok = false
+		}
+	}()
+	h.inbound.Handle(ctx, msg)
+	return true
+}
+
+// profileNameFor returns the pushname Meta supplies alongside the message.
+// It returns "" both when contacts[] is absent and when no entry's wa_id
+// matches the sender — callers must treat empty as "unknown", not as proof
+// that Meta omitted the block.
 func profileNameFor(contacts []metaContact, from string) string {
 	for _, c := range contacts {
 		if c.WaID == from {

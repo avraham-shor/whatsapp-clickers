@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -108,7 +109,16 @@ func (c *Client) SendText(ctx context.Context, to, body string) error {
 	if err != nil {
 		return fmt.Errorf("send-text request: %w", err)
 	}
-	defer resp.Body.Close()
+	// Drain before closing: Go's transport only returns a connection to the
+	// idle pool once the body is read to EOF. The 2xx path decodes nothing, so
+	// without this every send burns a fresh TCP+TLS handshake to
+	// graph.facebook.com — at the dispatcher's 70 msg/s design point that is 70
+	// handshakes per second against FR-4's 5s/95% budget. The limit guards
+	// against draining an unexpectedly large body.
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var metaErr metaErrorResponse

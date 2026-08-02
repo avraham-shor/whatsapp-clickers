@@ -236,3 +236,63 @@ func TestLoadReadsProcessEnv(t *testing.T) {
 		t.Errorf("Port = %q, want %q", cfg.Port, "9999")
 	}
 }
+
+// --- 2026-08-02 code review: placeholder validation was exact-match and
+// case-sensitive, with no whitespace trim ---
+
+// The README's local workflow sources server/.env through Git Bash
+// (`set -a; . server/.env`). A CRLF-authored .env on Windows leaves a trailing
+// carriage return on every value, so "dummy\r" slipped past the placeholder
+// check and the server booted on placeholder credentials — the exact failure
+// Task 1 exists to prevent. A stray \r on the app secret would also fail every
+// HMAC with an opaque "mismatch" that reads like forgery, not a config error.
+func TestLoadWhatsAppPlaceholderWithTrailingWhitespaceRejected(t *testing.T) {
+	for _, suffix := range []string{"\r", " ", "\t", "\r\n"} {
+		env := fullEnv()
+		env["WHATSAPP_ACCESS_TOKEN"] = "dummy" + suffix
+		if _, err := load(lookupFromMap(env)); err == nil {
+			t.Errorf("load() accepted placeholder %q", "dummy"+suffix)
+		} else if !strings.Contains(err.Error(), "WHATSAPP_ACCESS_TOKEN") {
+			t.Errorf("error does not name the offending variable: %v", err)
+		}
+	}
+}
+
+func TestLoadWhatsAppPlaceholderCaseInsensitive(t *testing.T) {
+	for _, value := range []string{"Dummy", "DUMMY", "Change-Me-Please", "CHANGE-ME"} {
+		env := fullEnv()
+		env["WHATSAPP_APP_SECRET"] = value
+		if _, err := load(lookupFromMap(env)); err == nil {
+			t.Errorf("load() accepted placeholder %q", value)
+		} else if !strings.Contains(err.Error(), "WHATSAPP_APP_SECRET") {
+			t.Errorf("error does not name the offending variable: %v", err)
+		}
+	}
+}
+
+// Trimming must reach the Config, not just the validation: an untrimmed secret
+// would be used verbatim as the HMAC key and break every signature check.
+func TestLoadTrimsWhitespaceFromValues(t *testing.T) {
+	env := fullEnv()
+	env["WHATSAPP_APP_SECRET"] = "  real-secret\r\n"
+	cfg, err := load(lookupFromMap(env))
+	if err != nil {
+		t.Fatalf("load() returned error: %v", err)
+	}
+	if cfg.WhatsAppAppSecret != "real-secret" {
+		t.Errorf("WhatsAppAppSecret = %q, want %q (untrimmed values break HMAC verification)", cfg.WhatsAppAppSecret, "real-secret")
+	}
+}
+
+// A whitespace-only value is as absent as an empty one.
+func TestLoadWhitespaceOnlyValueCountsAsMissing(t *testing.T) {
+	env := fullEnv()
+	env["WHATSAPP_VERIFY_TOKEN"] = "   "
+	_, err := load(lookupFromMap(env))
+	if err == nil {
+		t.Fatal("load() accepted a whitespace-only WHATSAPP_VERIFY_TOKEN")
+	}
+	if !strings.Contains(err.Error(), "WHATSAPP_VERIFY_TOKEN") {
+		t.Errorf("error does not name the variable: %v", err)
+	}
+}

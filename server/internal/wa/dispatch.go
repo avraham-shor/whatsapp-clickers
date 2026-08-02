@@ -16,11 +16,19 @@ const (
 	// dispatchWorkerCount workers drain the queue concurrently, all
 	// sharing one token-bucket limiter below.
 	dispatchWorkerCount = 8
-	// dispatchRateLimit is msg/sec, shared globally across all workers via
-	// one rate.Limiter — not per-worker. 70, not Meta's 80/sec ceiling:
-	// the AC requires staying *under* 80, and inbound traffic shares the
-	// same per-number throughput budget. 12.5% headroom still clears an
-	// 80-participant burst in ~1.2s, well inside FR-4's 5s/95% target.
+	// dispatchRateLimit is the sustained msg/sec, shared globally across all
+	// workers via one rate.Limiter — not per-worker. 70, not Meta's 80/sec
+	// ceiling: the AC requires staying *under* 80, and inbound traffic shares
+	// the same per-number throughput budget.
+	//
+	// This bounds the *sustained* rate, not any one-second window. The limiter
+	// is constructed with burst == rate, so after an idle period the bucket is
+	// full and a straddling second can carry up to ~2x this figure; an
+	// 80-message burst therefore drains in well under a second rather than the
+	// ~1.2s a strict 70/s would take. Deliberate and deferred (see
+	// deferred-work.md) — AC-4 governs the sustained rate, and the overshoot is
+	// a pilot non-issue. Lower the burst if a strict instantaneous ceiling is
+	// ever required.
 	dispatchRateLimit = 70
 	// dispatchMaxAttempts is the total number of SendText attempts per
 	// message (not retries-after-the-first): 3 attempts, 2 backoff waits
@@ -56,8 +64,8 @@ type outboundMessage struct {
 // Dispatcher is a fire-and-forget, rate-limited outbound sender. Enqueue
 // never blocks the caller (the game loop must never wait on delivery —
 // NFR-2); Run drains the queue with a worker pool sharing one token-bucket
-// limiter so total throughput stays under Meta's per-number ceiling
-// regardless of pool size.
+// limiter, so the sustained send rate is bounded globally regardless of pool
+// size (see dispatchRateLimit for what that does and does not guarantee).
 type Dispatcher struct {
 	client  SenderClient
 	logger  *slog.Logger
@@ -104,10 +112,16 @@ func (d *Dispatcher) Enqueue(to, body string) {
 	}
 }
 
-// Run starts the worker pool and blocks until ctx is cancelled. In-flight
-// sends finish (bounded by their own per-request timeout); anything still
-// queued is dropped with one summary WARN — an accepted pilot posture,
-// since a redeploy mid-game already interrupts the room.
+// Run starts the worker pool and blocks until ctx is cancelled.
+//
+// In-flight sends do NOT finish: SendText derives its per-request timeout from
+// this same ctx, so cancelling aborts the outbound HTTP request immediately.
+// A message whose POST Meta had already accepted, but whose response never
+// arrived, is therefore indeterminate — it may or may not have been delivered.
+// Both post-cancel exit paths in send() log an "abandoned" WARN so that state
+// is at least visible; they are not counted in dropped_count, which covers only
+// messages still sitting in the queue. Accepted pilot posture: a redeploy
+// mid-game already interrupts the room.
 func (d *Dispatcher) Run(ctx context.Context) {
 	var workers sync.WaitGroup
 	workers.Add(dispatchWorkerCount)
@@ -148,22 +162,28 @@ func (d *Dispatcher) send(ctx context.Context, msg outboundMessage) {
 	var lastErr error
 	for attempt := 1; attempt <= dispatchMaxAttempts; attempt++ {
 		if err := d.limiter.Wait(ctx); err != nil {
-			return // ctx cancelled while waiting for a rate-limit slot
+			// ctx cancelled while waiting for a rate-limit slot: never sent.
+			d.logger.Warn("send abandoned at shutdown", "phone_last4", PhoneLast4(msg.to), "stage", "rate-limit wait")
+			return
 		}
 		lastErr = d.client.SendText(ctx, msg.to, msg.body)
 		if lastErr == nil {
 			return
 		}
 		// A cancelled ctx (shutdown/redeploy) surfaces here as a send error,
-		// but it is not a real delivery failure: drop quietly rather than
-		// logging a misleading "send retry"/"send failed permanently" WARN.
+		// but it is not a real delivery failure: no "send retry"/"send failed
+		// permanently" WARN, which would misattribute it. Still logged — the
+		// request was aborted mid-flight, so delivery is indeterminate and
+		// silence would leave the operator no way to know it happened.
 		if ctx.Err() != nil {
+			d.logger.Warn("send abandoned at shutdown", "phone_last4", PhoneLast4(msg.to), "stage", "in flight", "attempt", attempt)
 			return
 		}
 		if attempt < dispatchMaxAttempts {
 			d.logger.Warn("send retry", "phone_last4", PhoneLast4(msg.to), "attempt", attempt, "error", lastErr.Error())
 			d.sleep(ctx, dispatchBackoff[attempt-1])
 			if ctx.Err() != nil {
+				d.logger.Warn("send abandoned at shutdown", "phone_last4", PhoneLast4(msg.to), "stage", "backoff", "attempt", attempt)
 				return
 			}
 		}

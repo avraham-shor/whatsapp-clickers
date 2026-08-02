@@ -34,8 +34,10 @@ func (b *syncBuffer) String() string {
 }
 
 // stubSender is a SenderClient stub grown in-test. failUntilAttempt makes
-// SendText fail for calls up to and including that count for a given
-// recipient, then succeed; -1 means never fail, 0 means always fail.
+// SendText fail for the first N calls the stub receives, then succeed;
+// -1 means never fail, 0 means always fail. The count is global across
+// recipients, not per recipient — a prior version of this comment claimed
+// otherwise, which mattered once a test finally used a positive value.
 type stubSender struct {
 	mu               sync.Mutex
 	calls            []string // "to" of every SendText call, in order
@@ -182,8 +184,53 @@ func TestDispatcherQueueFullDropsAndWarns(t *testing.T) {
 	if len(d.queue) != 2 {
 		t.Fatalf("queue length = %d, want 2 (full, not blocked)", len(d.queue))
 	}
-	if !strings.Contains(buf.String(), "outbound queue full, message dropped") {
-		t.Errorf("log missing queue-full WARN: %s", buf.String())
+	logs := buf.String()
+	if !strings.Contains(logs, "outbound queue full, message dropped") {
+		t.Errorf("log missing queue-full WARN: %s", logs)
+	}
+	// AC-5/NFR-4: the drop WARN carries a recipient, so it must be last-4 only.
+	if strings.Contains(logs, "972500000003") {
+		t.Errorf("queue-full WARN leaked the full recipient number: %s", logs)
+	}
+	if !strings.Contains(logs, "phone_last4="+PhoneLast4("972500000003")) {
+		t.Errorf("queue-full WARN missing phone_last4: %s", logs)
+	}
+}
+
+// The retry-then-success path: the stub fails once, the second attempt lands.
+// Every other dispatcher test pins failUntilAttempt to -1 or 0, so this middle
+// case — backoff taken exactly once, no permanent-failure WARN — was never
+// exercised despite being the whole point of the retry loop.
+func TestDispatcherRetriesThenSucceeds(t *testing.T) {
+	sender := &stubSender{failUntilAttempt: 1} // first call fails, rest succeed
+	d, buf := newTestDispatcher(t, sender)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		d.Run(ctx)
+		close(runDone)
+	}()
+
+	d.Enqueue("972500009999", "delivered on the second attempt")
+	waitForCallCount(t, sender, 2)
+	waitForLogContains(t, buf, "send retry")
+	cancel()
+	<-runDone
+
+	if got := sender.callCount(); got != 2 {
+		t.Errorf("SendText called %d times, want 2 (one failure, one success)", got)
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "send retry") {
+		t.Errorf("log missing the retry WARN: %s", logs)
+	}
+	if strings.Contains(logs, "send failed permanently") {
+		t.Errorf("a message that eventually succeeded must not log a permanent failure: %s", logs)
+	}
+	// The retry WARN carries a recipient too (NFR-4).
+	if strings.Contains(logs, "972500009999") {
+		t.Errorf("retry WARN leaked the full recipient number: %s", logs)
 	}
 }
 

@@ -35,6 +35,13 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 	var missing []string
 	require := func(name string) string {
 		v, ok := lookup(name)
+		// Trim before every downstream check. The README's local workflow
+		// sources server/.env through Git Bash (`set -a; . server/.env`), and a
+		// CRLF-authored .env on Windows leaves a trailing \r on every value:
+		// "dummy\r" would slip past the placeholder validation below, and an
+		// app secret carrying \r fails every HMAC with an opaque "mismatch"
+		// that reads like forgery rather than a config error.
+		v = strings.TrimSpace(v)
 		if !ok || v == "" {
 			missing = append(missing, name)
 		}
@@ -100,9 +107,13 @@ func validateWhatsAppValues(cfg *Config) error {
 		{"WHATSAPP_VERIFY_TOKEN", cfg.WhatsAppVerifyToken},
 	}
 
+	// Case-insensitive: this is a last-resort safety net, and "Dummy" or
+	// "CHANGE-ME" are the same mistake as the lowercase forms. Values are
+	// already TrimSpace'd by require().
 	var offenders []string
 	for _, c := range candidates {
-		if c.value == "dummy" || strings.HasPrefix(c.value, "change-me") {
+		lower := strings.ToLower(c.value)
+		if lower == "dummy" || strings.HasPrefix(lower, "change-me") {
 			offenders = append(offenders, c.name)
 		}
 	}
