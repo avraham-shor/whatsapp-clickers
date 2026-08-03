@@ -54,6 +54,24 @@ export interface GameList {
   items: GameListItem[]
 }
 
+/** Mirrors the Go game.Snapshot — the REST open-lobby response body and the
+ * WS envelope's "state" field share this one shape. */
+export interface LobbySnapshot {
+  gameId: string
+  state: GameState
+  joinCode: string
+  platformNumber: string
+  participantCount: number
+  participants: { id: string; displayName: string }[]
+}
+
+/** The one WS wire message shape: server->client only, full snapshots. */
+export interface SnapshotEnvelope {
+  type: 'snapshot'
+  seq: number
+  state: LobbySnapshot
+}
+
 /** A Question Bank package card: title, count, and a first-question preview (A13). */
 export interface QuestionPackage {
   id: string

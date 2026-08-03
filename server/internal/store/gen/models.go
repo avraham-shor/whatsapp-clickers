@@ -43,6 +43,15 @@ type PackageQuestion struct {
 	UpdatedAt        time.Time
 }
 
+type Participant struct {
+	ID          string
+	GameID      string
+	Phone       string
+	DisplayName string
+	Role        string
+	JoinedAt    time.Time
+}
+
 type Question struct {
 	ID               string
 	GameID           string

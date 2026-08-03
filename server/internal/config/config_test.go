@@ -19,6 +19,7 @@ func fullEnv() map[string]string {
 		"WHATSAPP_PHONE_NUMBER_ID": "12345",
 		"WHATSAPP_APP_SECRET":      "secret",
 		"WHATSAPP_VERIFY_TOKEN":    "verify",
+		"WHATSAPP_DISPLAY_NUMBER":  "+972 50-000-0000",
 		"ANTHROPIC_API_KEY":        "key",
 		"SESSION_SECRET":           "test-session-secret-0123456789abcdef",
 	}
@@ -170,7 +171,7 @@ func TestLoadWhatsAppDummyRejected(t *testing.T) {
 }
 
 func TestLoadWhatsAppChangeMePrefixRejected(t *testing.T) {
-	for _, name := range []string{"WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN"} {
+	for _, name := range []string{"WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_DISPLAY_NUMBER"} {
 		env := fullEnv()
 		env[name] = "change-me-please"
 
@@ -209,6 +210,42 @@ func TestLoadWhatsAppValidValuesPass(t *testing.T) {
 	}
 	if cfg.WhatsAppAccessToken != "token" {
 		t.Errorf("WhatsAppAccessToken = %q, want %q", cfg.WhatsAppAccessToken, "token")
+	}
+}
+
+func TestLoadDisplayNumberMissingNamedInError(t *testing.T) {
+	env := fullEnv()
+	delete(env, "WHATSAPP_DISPLAY_NUMBER")
+
+	_, err := load(lookupFromMap(env))
+	if err == nil {
+		t.Fatal("load() succeeded without WHATSAPP_DISPLAY_NUMBER, want error")
+	}
+	if !strings.Contains(err.Error(), "WHATSAPP_DISPLAY_NUMBER") {
+		t.Errorf("error %q does not name WHATSAPP_DISPLAY_NUMBER", err.Error())
+	}
+}
+
+func TestLoadDisplayNumberDummyRejected(t *testing.T) {
+	env := fullEnv()
+	env["WHATSAPP_DISPLAY_NUMBER"] = "dummy"
+
+	_, err := load(lookupFromMap(env))
+	if err == nil {
+		t.Fatal("load() succeeded with dummy WHATSAPP_DISPLAY_NUMBER, want error")
+	}
+	if !strings.Contains(err.Error(), "WHATSAPP_DISPLAY_NUMBER") {
+		t.Errorf("error %q does not name WHATSAPP_DISPLAY_NUMBER", err.Error())
+	}
+}
+
+func TestLoadDisplayNumberRealValueCarriedThrough(t *testing.T) {
+	cfg, err := load(lookupFromMap(fullEnv()))
+	if err != nil {
+		t.Fatalf("load() returned error with full env: %v", err)
+	}
+	if cfg.WhatsAppDisplayNumber != "+972 50-000-0000" {
+		t.Errorf("WhatsAppDisplayNumber = %q, want %q", cfg.WhatsAppDisplayNumber, "+972 50-000-0000")
 	}
 }
 

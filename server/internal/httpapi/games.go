@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/avraham-shor/whatsapp-clickers/internal/game"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store/gen"
 )
@@ -29,9 +30,6 @@ type GameStore interface {
 	ListQuestionPackages(ctx context.Context) ([]gen.ListQuestionPackagesRow, error)
 	ImportPackageQuestions(ctx context.Context, gameID, organizerID, packageID string) ([]gen.Question, error)
 }
-
-// gameStateDraft is the only state in which a game's content is editable.
-const gameStateDraft = "draft"
 
 // maxTitleRunes bounds the game title (runes, not bytes — titles are Hebrew).
 const maxTitleRunes = 120
@@ -120,16 +118,16 @@ func gameIDParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 // requireDraftGame loads the organizer's game and enforces the draft-only
 // mutation guardrail; a false return means the response is written.
 func requireDraftGame(ctx context.Context, w http.ResponseWriter, games GameStore, gameID, organizerID string) (gen.Game, bool) {
-	game, err := games.GetGameForOrganizer(ctx, gameID, organizerID)
+	g, err := games.GetGameForOrganizer(ctx, gameID, organizerID)
 	if err != nil {
 		writeStoreError(w, err, "GAME_NOT_FOUND")
 		return gen.Game{}, false
 	}
-	if game.State != gameStateDraft {
+	if g.State != game.StateDraft {
 		writeError(w, http.StatusConflict, "GAME_NOT_EDITABLE", "game content can only be edited while in draft state")
 		return gen.Game{}, false
 	}
-	return game, true
+	return g, true
 }
 
 func handleCreateGame(games GameStore) http.HandlerFunc {

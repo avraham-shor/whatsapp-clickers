@@ -9,6 +9,9 @@ export const strings = {
     loading: 'טוען…',
     connectionError: 'החיבור לשרת נכשל. נסו שוב בעוד רגע.',
     cancel: 'ביטול',
+    // Live surfaces (lobby, and later live/display) show this only while
+    // the WebSocket itself is down — never for a plain REST fetch (UX-DR12).
+    connecting: 'מתחבר…',
   },
   nav: {
     myGames: 'המשחקים שלי',
@@ -44,6 +47,7 @@ export const strings = {
   gameEditor: {
     joinCodeLabel: 'קוד הצטרפות',
     addQuestion: 'הוספת שאלה',
+    openLobby: 'פתיחת הלובי',
     emptyStateTitle: 'עוד אין שאלות במשחק הזה.',
     emptyStateBody: 'הוסיפו שאלה ראשונה — או ייבאו חבילה מהמאגר.',
     emptyStateAddCta: 'הוסיפו שאלה ראשונה',
@@ -125,5 +129,13 @@ export const strings = {
   notFound: {
     message: 'הדף הזה לא קיים. ייתכן שהקישור שגוי או שהעמוד הוסר.',
     backHome: 'חזרה למסך הראשי',
+  },
+  lobby: {
+    openLobbyCta: 'פתח לובי',
+    openLobbyError: 'פתיחת הלובי נכשלה. נסו שוב בעוד רגע.',
+    openLobbyAlreadyOpen: 'הלובי כבר פתוח. רעננו את הדף כדי לראות את המצב העדכני.',
+    platformNumberLabel: 'מספר הוואטסאפ של המשחק',
+    participantCountLabel: (count: number) =>
+      count === 1 ? 'משתתף אחד בלובי' : `${count} משתתפים בלובי`,
   },
 } as const

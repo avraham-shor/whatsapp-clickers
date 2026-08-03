@@ -22,8 +22,13 @@ type Config struct {
 	// and assert that replies are actually *sent*, not merely that the webhook
 	// returned 200. Neither required nor placeholder-validated.
 	WhatsAppAPIBaseURL string
-	AnthropicAPIKey    string
-	SessionSecret      string
+	// WhatsAppDisplayNumber is the human-readable number the lobby page
+	// shows the Organizer to relay to the room (Meta's Graph API
+	// display_phone_number field). Required — there is no safe default for
+	// a value the room reads off a projector/dashboard.
+	WhatsAppDisplayNumber string
+	AnthropicAPIKey       string
+	SessionSecret         string
 }
 
 const defaultPort = "8080"
@@ -60,6 +65,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 		WhatsAppPhoneNumberID: require("WHATSAPP_PHONE_NUMBER_ID"),
 		WhatsAppAppSecret:     require("WHATSAPP_APP_SECRET"),
 		WhatsAppVerifyToken:   require("WHATSAPP_VERIFY_TOKEN"),
+		WhatsAppDisplayNumber: require("WHATSAPP_DISPLAY_NUMBER"),
 		AnthropicAPIKey:       require("ANTHROPIC_API_KEY"),
 		SessionSecret:         require("SESSION_SECRET"),
 	}
@@ -117,6 +123,7 @@ func validateWhatsAppValues(cfg *Config) error {
 		{"WHATSAPP_PHONE_NUMBER_ID", cfg.WhatsAppPhoneNumberID},
 		{"WHATSAPP_APP_SECRET", cfg.WhatsAppAppSecret},
 		{"WHATSAPP_VERIFY_TOKEN", cfg.WhatsAppVerifyToken},
+		{"WHATSAPP_DISPLAY_NUMBER", cfg.WhatsAppDisplayNumber},
 	}
 
 	// Case-insensitive: this is a last-resort safety net, and "Dummy" or

@@ -26,3 +26,12 @@ SET points_per_correct = $3,
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2
 RETURNING *;
+
+-- The AND state = 'draft' makes a concurrent double-click race-safe: only
+-- one caller's UPDATE matches a row.
+-- name: OpenGameLobby :one
+UPDATE games
+SET state = 'lobby',
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state = 'draft'
+RETURNING *;

@@ -129,6 +129,40 @@ func (q *Queries) ListGamesByOrganizer(ctx context.Context, organizerID string) 
 	return items, nil
 }
 
+const openGameLobby = `-- name: OpenGameLobby :one
+UPDATE games
+SET state = 'lobby',
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state = 'draft'
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third
+`
+
+type OpenGameLobbyParams struct {
+	ID          string
+	OrganizerID string
+}
+
+// The AND state = 'draft' makes a concurrent double-click race-safe: only
+// one caller's UPDATE matches a row.
+func (q *Queries) OpenGameLobby(ctx context.Context, arg OpenGameLobbyParams) (Game, error) {
+	row := q.db.QueryRow(ctx, openGameLobby, arg.ID, arg.OrganizerID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+	)
+	return i, err
+}
+
 const updateGameScoring = `-- name: UpdateGameScoring :one
 UPDATE games
 SET points_per_correct = $3,

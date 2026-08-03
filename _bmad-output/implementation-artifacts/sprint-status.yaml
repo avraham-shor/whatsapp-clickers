@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-07-10
-last_updated: 2026-08-02
+last_updated: 2026-08-03
 project: whatsapp-clickers
 project_key: NOKEY
 tracking_system: file-system
@@ -55,7 +55,7 @@ development_status:
   epic-2: in-progress
   2-1-whatsapp-webhook-intake-and-outbound-dispatch: done
   2-2-universal-reply-the-chat-never-goes-silent: done
-  2-3-open-the-lobby-and-watch-it-live: backlog
+  2-3-open-the-lobby-and-watch-it-live: done
   2-4-join-the-game-with-one-whatsapp-message: backlog
   2-5-late-join-becomes-spectator: backlog
   epic-2-retrospective: optional

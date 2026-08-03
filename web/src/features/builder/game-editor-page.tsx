@@ -133,6 +133,9 @@ export function GameEditorPage() {
           >
             {strings.gameEditor.addQuestion}
           </Button>
+          <Button asChild className="h-10 bg-green-800 text-ink-on-dark hover:bg-green-900">
+            <Link to={`/games/${gameId}/lobby`}>{strings.gameEditor.openLobby}</Link>
+          </Button>
         </div>
       </header>
 

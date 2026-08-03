@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/avraham-shor/whatsapp-clickers/internal/game"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 )
 
@@ -45,6 +46,8 @@ func writeStoreError(w http.ResponseWriter, err error, notFoundCode string) {
 		writeError(w, http.StatusNotFound, notFoundCode, "no such resource for this organizer")
 	case errors.Is(err, store.ErrReorderMismatch):
 		writeValidationError(w, "questionIds must be an exact permutation of the game's question ids")
+	case errors.Is(err, game.ErrNotDraft):
+		writeError(w, http.StatusConflict, "GAME_NOT_EDITABLE", "game must be in draft state to open its lobby")
 	default:
 		// Infrastructure: the wire code alone must not be the only triage
 		// signal — record the underlying cause.

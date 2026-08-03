@@ -139,7 +139,7 @@ const validScoringBody = `{"pointsPerCorrect":200,"speedBonusFirst":100,"speedBo
 // gamesRouter builds a router with an authenticated org-1 session.
 func gamesRouter(games GameStore) http.Handler {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	return NewRouter(stubPinger{}, svc, games, testStatic(), nil)
+	return NewRouter(stubPinger{}, svc, games, testStatic(), nil, nil, nil, nil)
 }
 
 // authedRequest carries the session cookie the stubAuth accepts.
@@ -328,7 +328,7 @@ func TestMalformedGameIDReturns404WithoutStoreCall(t *testing.T) {
 }
 
 func TestGameMutationsWithoutSessionReturn401(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), draftGame(), testStatic(), nil)
+	router := NewRouter(stubPinger{}, noAuth(), draftGame(), testStatic(), nil, nil, nil, nil)
 	for name, req := range map[string]*http.Request{
 		"create game":     httptest.NewRequest(http.MethodPost, "/api/games", strings.NewReader(`{"title":"x"}`)),
 		"list games":      httptest.NewRequest(http.MethodGet, "/api/games", nil),

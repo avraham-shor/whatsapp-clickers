@@ -7,6 +7,7 @@ import { DashboardLayout } from '@/components/dashboard-layout'
 import { LoginPage } from '@/features/auth/login-page'
 import { GamesListPage } from '@/features/builder/games-list-page'
 import { GameEditorPage } from '@/features/builder/game-editor-page'
+import { LobbyPage } from '@/features/lobby/lobby-page'
 
 interface Organizer {
   id: string
@@ -69,6 +70,7 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <GamesListPage /> },
           { path: 'games/:gameId', element: <GameEditorPage /> },
+          { path: 'games/:gameId/lobby', element: <LobbyPage /> },
         ],
       },
     ],

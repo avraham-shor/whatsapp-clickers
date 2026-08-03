@@ -15,10 +15,12 @@ import (
 
 	"github.com/avraham-shor/whatsapp-clickers/internal/auth"
 	"github.com/avraham-shor/whatsapp-clickers/internal/config"
+	"github.com/avraham-shor/whatsapp-clickers/internal/game"
 	"github.com/avraham-shor/whatsapp-clickers/internal/httpapi"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 	"github.com/avraham-shor/whatsapp-clickers/internal/wa"
 	"github.com/avraham-shor/whatsapp-clickers/internal/webdist"
+	"github.com/avraham-shor/whatsapp-clickers/internal/ws"
 	"github.com/avraham-shor/whatsapp-clickers/migrations"
 )
 
@@ -112,8 +114,13 @@ func run(logger *slog.Logger) error {
 	// st satisfies Deduper directly (MarkWaMessageProcessed).
 	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, cfg.WhatsAppPhoneNumberID, st, inboundRouter, logger)
 
+	// st satisfies game.Store (GetGameForOrganizer, OpenGameLobby, ListParticipants).
+	engine := game.NewEngine(st, cfg.WhatsAppDisplayNumber, logger)
+	hub := ws.NewHub(logger)
+	wsHandler := ws.NewHandler(authSvc, engine, hub, logger)
+
 	// st satisfies both Pinger and GameStore.
-	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler)
+	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -121,7 +128,7 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// WriteTimeout must not outlive long-lived connections; /ws
-		// (story 2.3) hijacks the conn, which clears these deadlines.
+		// hijacks the conn, which clears these deadlines.
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  2 * time.Minute,
 	}

@@ -25,12 +25,18 @@ type Pinger interface {
 // webhook is mounted at /webhooks/whatsapp outside /api with no session
 // middleware — Story 2.1's HMAC check is its own auth; nil omits the
 // branch entirely (keeps callers that don't need it, e.g. most tests,
-// compiling with a single added nil arg).
-func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, webhook http.Handler) http.Handler {
+// compiling with a single added nil arg). engine and hub back the
+// open-lobby route — either being nil omits that route too (both are
+// required together; a single argument can't observably desync them);
+// wsHandler is mounted at /ws like webhook — nil omits that branch too.
+func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, webhook http.Handler, engine LobbyEngine, hub SnapshotBroadcaster, wsHandler http.Handler) http.Handler {
 	r := chi.NewRouter()
 
 	if webhook != nil {
 		r.Mount("/webhooks/whatsapp", webhook)
+	}
+	if wsHandler != nil {
+		r.Get("/ws", wsHandler.ServeHTTP)
 	}
 
 	r.Route("/api", func(api chi.Router) {
@@ -63,6 +69,9 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, we
 				g.Route("/{gameID}", func(gr chi.Router) {
 					gr.Get("/", handleGetGame(games))
 					gr.Put("/scoring", handleUpdateScoring(games))
+					if engine != nil && hub != nil {
+						gr.Post("/open-lobby", handleOpenLobby(engine, hub))
+					}
 					gr.Route("/questions", func(qr chi.Router) {
 						qr.Post("/", handleCreateQuestion(games))
 						qr.Post("/reorder", handleReorderQuestions(games))
