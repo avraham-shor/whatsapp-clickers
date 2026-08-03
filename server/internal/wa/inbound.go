@@ -199,6 +199,8 @@ func (r *InboundRouter) handleJoin(ctx context.Context, msg InboundMessage) {
 			reply = welcomeMessage(result.DisplayName)
 		case game.JoinPreLobby:
 			reply = preLobbyMessage()
+		case game.JoinSpectator:
+			reply = spectatorNoticeMessage()
 		default:
 			// Belt and braces: an outcome this router does not yet know
 			// about still gets a reply rather than silence.
@@ -222,12 +224,9 @@ func (r *InboundRouter) handleJoin(ctx context.Context, msg InboundMessage) {
 		r.logger.Info("join rejected, invalid code",
 			"phone_last4", PhoneLast4(msg.From),
 			"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
-	case errors.Is(err, game.ErrGameStarted):
-		// Story 2.5's spectator registration replaces this branch; until
-		// then, an intentional, documented gap — the Help fallback keeps
-		// FR-2's "no inbound message class results in silence" guarantee.
+	case errors.Is(err, game.ErrGameFinished):
 		r.replier.Enqueue(msg.From, helpMessage())
-		r.logger.Info("join deferred, game already started (spectator registration lands in story 2.5)",
+		r.logger.Info("join rejected, game already finished",
 			"phone_last4", PhoneLast4(msg.From),
 			"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
 	default:

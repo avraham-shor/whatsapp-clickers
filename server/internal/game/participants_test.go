@@ -129,21 +129,105 @@ func TestJoinDraftGameReturnsPreLobbyWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestJoinGameAlreadyStartedReturnsErrGameStartedWithoutWriting(t *testing.T) {
-	states := []string{StateQuestionOpen, StateQuestionClosed, StateRevealed, StateLeaderboard, StateFinished}
+func TestJoinDuringLiveStatesRegistersSpectator(t *testing.T) {
+	states := []string{StateQuestionOpen, StateQuestionClosed, StateRevealed, StateLeaderboard}
 	for _, state := range states {
 		t.Run(state, func(t *testing.T) {
 			st := joinStub(state)
 			e := NewEngine(st, "+972 50-000-0000", nil)
 
-			_, err := e.Join(context.Background(), "AB2CD3", testPhone, "דנה")
-			if !errors.Is(err, ErrGameStarted) {
-				t.Fatalf("Join() err = %v, want ErrGameStarted", err)
+			result, err := e.Join(context.Background(), "AB2CD3", testPhone, "דנה")
+			if err != nil {
+				t.Fatalf("Join() err = %v, want nil", err)
 			}
-			if st.createParticipantCalls != 0 {
-				t.Errorf("CreateParticipant called %d times, want 0", st.createParticipantCalls)
+			if result.Outcome != JoinSpectator {
+				t.Errorf("Outcome = %q, want JoinSpectator", result.Outcome)
+			}
+			if !result.Created {
+				t.Error("Created = false, want true (first join)")
+			}
+			if result.DisplayName != "דנה" {
+				t.Errorf("DisplayName = %q, want the profile name", result.DisplayName)
+			}
+			if result.Snapshot.GameID != "" {
+				t.Errorf("Snapshot = %+v, want the zero value (spectator join never broadcasts)", result.Snapshot)
+			}
+			if st.createParticipantCalls != 1 {
+				t.Errorf("CreateParticipant called %d times, want 1", st.createParticipantCalls)
+			}
+			if st.createParticipantRole != RoleSpectator {
+				t.Errorf("CreateParticipant role = %q, want RoleSpectator", st.createParticipantRole)
 			}
 		})
+	}
+}
+
+func TestJoinSpectatorEmptyProfileNameFallsBackToPhoneDigits(t *testing.T) {
+	st := joinStub(StateQuestionOpen)
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.Join(context.Background(), "AB2CD3", testPhone, "")
+	if err != nil {
+		t.Fatalf("Join() err = %v, want nil", err)
+	}
+	if want := fallbackParticipantName(testPhone); result.DisplayName != want {
+		t.Errorf("DisplayName = %q, want fallback %q", result.DisplayName, want)
+	}
+}
+
+func TestJoinSpectatorIdempotentRepeat(t *testing.T) {
+	st := joinStub(StateQuestionOpen)
+	st.createParticipantCreated = false
+	// Distinct from the resent profile name below: on a real conflict the
+	// store's ON CONFLICT DO NOTHING + refetch returns the EXISTING row's
+	// stored name, not whatever this call tried to write (AC-3).
+	st.createParticipantResult.DisplayName = "דנה הישנה"
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.Join(context.Background(), "AB2CD3", testPhone, "דנה")
+	if err != nil {
+		t.Fatalf("Join() err = %v, want nil", err)
+	}
+	if result.Outcome != JoinSpectator {
+		t.Errorf("Outcome = %q, want JoinSpectator even on a repeat", result.Outcome)
+	}
+	if result.Created {
+		t.Error("Created = true, want false (idempotent repeat)")
+	}
+	if result.DisplayName != "דנה הישנה" {
+		t.Errorf("DisplayName = %q, want the existing stored name %q, not the resent profile name", result.DisplayName, "דנה הישנה")
+	}
+	if result.Snapshot.GameID != "" {
+		t.Errorf("Snapshot = %+v, want the zero value (nothing changed, nothing to broadcast)", result.Snapshot)
+	}
+}
+
+func TestJoinFinishedGameReturnsErrGameFinishedWithoutWriting(t *testing.T) {
+	st := joinStub(StateFinished)
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Join(context.Background(), "AB2CD3", testPhone, "דנה")
+	if !errors.Is(err, ErrGameFinished) {
+		t.Fatalf("Join() err = %v, want ErrGameFinished", err)
+	}
+	if st.createParticipantCalls != 0 {
+		t.Errorf("CreateParticipant called %d times, want 0", st.createParticipantCalls)
+	}
+}
+
+func TestJoinUnknownStateFailsClosedWithoutWriting(t *testing.T) {
+	st := joinStub("cancelled")
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Join(context.Background(), "AB2CD3", testPhone, "דנה")
+	if err == nil {
+		t.Fatal("Join() err = nil, want an unexpected-state error")
+	}
+	if errors.Is(err, ErrGameFinished) || errors.Is(err, ErrInvalidJoinCode) {
+		t.Fatalf("Join() err = %v, want a plain unexpected-state error, not a known sentinel", err)
+	}
+	if st.createParticipantCalls != 0 {
+		t.Errorf("CreateParticipant called %d times, want 0", st.createParticipantCalls)
 	}
 }
 

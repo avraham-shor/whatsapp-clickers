@@ -57,7 +57,7 @@ development_status:
   2-2-universal-reply-the-chat-never-goes-silent: done
   2-3-open-the-lobby-and-watch-it-live: done
   2-4-join-the-game-with-one-whatsapp-message: done
-  2-5-late-join-becomes-spectator: backlog
+  2-5-late-join-becomes-spectator: done
   epic-2-retrospective: optional
 
   # Epic 3: Live Gameplay — A Complete Game Runs in WhatsApp

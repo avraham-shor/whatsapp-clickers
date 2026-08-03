@@ -18,7 +18,7 @@ package wa
 //	Pre-lobby reply          -> story 2.4 (below)
 //	Invalid code             -> story 2.4 (below)
 //	Name updated             -> story 2.4 (below)
-//	Spectator notice         -> story 2.5
+//	Spectator notice         -> story 2.5 (below)
 //	Question - MCQ           -> story 3.2
 //	Question - Free-Text     -> story 3.2
 //	Acknowledgment           -> story 3.3
@@ -125,4 +125,15 @@ const msgNameUpdatedTemplate = "עודכן ✓ מעכשיו: %s"
 // nameUpdatedMessage returns the Name-updated confirmation copy.
 func nameUpdatedMessage(displayName string) string {
 	return fmt.Sprintf(msgNameUpdatedTemplate, ltr(displayName))
+}
+
+// msgSpectatorNoticeReply is sent when a valid JOIN arrives while the game
+// is already running — question_open through leaderboard (EXPERIENCE.md's
+// "Question open"/"Between questions²" columns). A finished game gets Help
+// instead (story 2.5 AC 2) — this function is never called for one.
+const msgSpectatorNoticeReply = "המשחק כבר התחיל! נרשמת כצופה — התוצאות יגיעו לכאן בסוף המשחק 🏆"
+
+// spectatorNoticeMessage returns the Spectator-notice copy.
+func spectatorNoticeMessage() string {
+	return msgSpectatorNoticeReply
 }

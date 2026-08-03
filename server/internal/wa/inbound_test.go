@@ -329,9 +329,25 @@ func TestHandleJoinInvalidCodeSendsInvalidCodeMessageWithUppercasedCode(t *testi
 	}
 }
 
-func TestHandleJoinGameStartedSendsHelp(t *testing.T) {
+func TestHandleJoinSpectatorSendsSpectatorNotice(t *testing.T) {
 	replier := &stubReplier{}
-	registrar := &stubRegistrar{joinErr: game.ErrGameStarted}
+	broadcaster := &stubBroadcaster{}
+	registrar := &stubRegistrar{joinResult: game.JoinResult{Outcome: game.JoinSpectator, GameID: "game-1", DisplayName: "דנה", Created: true}}
+	r := NewInboundRouter(replier, registrar, broadcaster, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "JOIN COHEN24"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != spectatorNoticeMessage() {
+		t.Fatalf("reply = %+v, want the Spectator-notice message", replier.calls)
+	}
+	if len(broadcaster.calls) != 0 {
+		t.Errorf("broadcast calls = %+v, want none (spectator join never broadcasts)", broadcaster.calls)
+	}
+}
+
+func TestHandleJoinFinishedGameSendsHelp(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{joinErr: game.ErrGameFinished}
 	logger, buf := newTestLogger()
 	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, logger)
 
@@ -341,7 +357,7 @@ func TestHandleJoinGameStartedSendsHelp(t *testing.T) {
 		t.Fatalf("reply = %+v, want the Help message", replier.calls)
 	}
 	if strings.Contains(buf.String(), "level=WARN") {
-		t.Errorf("ErrGameStarted is a documented gap, not a failure — must not WARN: %s", buf.String())
+		t.Errorf("ErrGameFinished is an expected reply path, not a failure — must not WARN: %s", buf.String())
 	}
 }
 

@@ -13,10 +13,11 @@ import (
 // comparison, so an editor mangling the mixed-direction literal fails the
 // build instead of shipping scrambled Hebrew.
 const (
-	canonicalWelcomeCopy     = "היי %s, נרשמת! 🎉 השאירו את הצ'אט הזה פתוח — השאלות יגיעו לכאן. (לא %s? שלחו לדוגמה — שם: רחל לוי)"
-	canonicalPreLobbyCopy    = "הקוד נכון! ההרשמה עוד לא נפתחה — שלחו שוב את ההודעה כשהמארגן מכריז שמתחילים."
-	canonicalInvalidCodeCopy = "הקוד %s לא נמצא. בדקו את הקוד עם המארגן ושלחו שוב: %s ואחריו הקוד."
-	canonicalNameUpdatedCopy = "עודכן ✓ מעכשיו: %s"
+	canonicalWelcomeCopy         = "היי %s, נרשמת! 🎉 השאירו את הצ'אט הזה פתוח — השאלות יגיעו לכאן. (לא %s? שלחו לדוגמה — שם: רחל לוי)"
+	canonicalPreLobbyCopy        = "הקוד נכון! ההרשמה עוד לא נפתחה — שלחו שוב את ההודעה כשהמארגן מכריז שמתחילים."
+	canonicalInvalidCodeCopy     = "הקוד %s לא נמצא. בדקו את הקוד עם המארגן ושלחו שוב: %s ואחריו הקוד."
+	canonicalNameUpdatedCopy     = "עודכן ✓ מעכשיו: %s"
+	canonicalSpectatorNoticeCopy = "המשחק כבר התחיל! נרשמת כצופה — התוצאות יגיעו לכאן בסוף המשחק 🏆"
 )
 
 func stripIsolates(s string) string {
@@ -95,5 +96,13 @@ func TestNameUpdatedMessageIsolatesLTRTokens(t *testing.T) {
 	isolated := lriMark + name + pdiMark
 	if !strings.Contains(got, isolated) {
 		t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", name, got)
+	}
+}
+
+// --- Spectator notice ---
+
+func TestSpectatorNoticeMessageMatchesCanonicalCopy(t *testing.T) {
+	if got := spectatorNoticeMessage(); got != canonicalSpectatorNoticeCopy {
+		t.Errorf("Spectator-notice copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", got, canonicalSpectatorNoticeCopy)
 	}
 }

@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
@@ -12,21 +13,21 @@ import (
 // ErrInvalidJoinCode means no game matches the JOIN code sent.
 var ErrInvalidJoinCode = errors.New("game: invalid join code")
 
-// ErrGameStarted means the code is valid but the game has moved past lobby.
-// Story 2.5 turns this into spectator registration; until then it is an
-// intentional, documented gap — see story 2.4 Dev Notes.
-var ErrGameStarted = errors.New("game: already started")
+// ErrGameFinished means the code is valid but the game has already ended —
+// maps to the Help reply, never spectator registration (AC 2).
+var ErrGameFinished = errors.New("game: already finished")
 
 // ErrParticipantNotFound means a name-change sender has no participant row
 // anywhere.
 var ErrParticipantNotFound = errors.New("game: participant not found")
 
-// JoinOutcome distinguishes the two non-error paths Join can take.
+// JoinOutcome distinguishes the non-error paths Join can take.
 type JoinOutcome string
 
 const (
-	JoinWelcome  JoinOutcome = "welcome"
-	JoinPreLobby JoinOutcome = "pre_lobby"
+	JoinWelcome   JoinOutcome = "welcome"
+	JoinPreLobby  JoinOutcome = "pre_lobby"
+	JoinSpectator JoinOutcome = "spectator"
 )
 
 // JoinResult is Join's success return. Snapshot is the zero value unless
@@ -76,16 +77,31 @@ func (e *Engine) Join(ctx context.Context, joinCode, phone, profileName string) 
 		return JoinResult{Outcome: JoinPreLobby, GameID: g.ID}, nil
 	case StateLobby:
 		return e.joinLobby(ctx, g, phone, profileName)
+	case StateQuestionOpen, StateQuestionClosed, StateRevealed, StateLeaderboard:
+		return e.joinSpectator(ctx, g, phone, profileName)
+	case StateFinished:
+		return JoinResult{}, ErrGameFinished
 	default:
-		return JoinResult{}, ErrGameStarted
+		// A state this switch does not know cannot safely register anyone —
+		// fail closed (no write) rather than guess; wa degrades it to Help.
+		return JoinResult{}, fmt.Errorf("game: unexpected state %q", g.State)
 	}
 }
 
-func (e *Engine) joinLobby(ctx context.Context, g gen.Game, phone, profileName string) (JoinResult, error) {
+// resolveDisplayName resolves a Participant's display name from the WhatsApp
+// profile name, falling back to the phone's last 4 digits when empty. Shared
+// by joinLobby and joinSpectator so the two paths cannot drift on this
+// locked, documented fallback rule.
+func resolveDisplayName(profileName, phone string) string {
 	displayName := strings.TrimSpace(profileName)
 	if displayName == "" {
 		displayName = fallbackParticipantName(phone)
 	}
+	return displayName
+}
+
+func (e *Engine) joinLobby(ctx context.Context, g gen.Game, phone, profileName string) (JoinResult, error) {
+	displayName := resolveDisplayName(profileName, phone)
 	p, created, err := e.store.CreateParticipant(ctx, g.ID, phone, displayName, RolePlayer)
 	if err != nil {
 		return JoinResult{}, err
@@ -108,6 +124,20 @@ func (e *Engine) joinLobby(ctx context.Context, g gen.Game, phone, profileName s
 	}
 	result.Snapshot = snap
 	return result, nil
+}
+
+// joinSpectator registers phone as a spectator of a Game that has already
+// left lobby (question_open through leaderboard). Unlike joinLobby, it never
+// builds or broadcasts a Snapshot — nothing consumes role in Snapshot today,
+// and the only live-state consumer (the lobby page) is meaningless once a
+// game has left lobby. See story 2.5 Dev Notes.
+func (e *Engine) joinSpectator(ctx context.Context, g gen.Game, phone, profileName string) (JoinResult, error) {
+	displayName := resolveDisplayName(profileName, phone)
+	p, created, err := e.store.CreateParticipant(ctx, g.ID, phone, displayName, RoleSpectator)
+	if err != nil {
+		return JoinResult{}, err
+	}
+	return JoinResult{Outcome: JoinSpectator, GameID: g.ID, DisplayName: p.DisplayName, Created: created}, nil
 }
 
 // Rename updates phone's most-recently-joined participant row's display
