@@ -41,6 +41,35 @@ func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, e
 	return i, err
 }
 
+const getGameByJoinCode = `-- name: GetGameByJoinCode :one
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third FROM games WHERE join_code = $1
+`
+
+// Unscoped by organizer_id on purpose: a Participant's JOIN message carries
+// no organizer context. This is architecturally distinct from the CRUD
+// endpoints' "ownership always in the WHERE clause" doctrine above — that
+// doctrine is about the organizer-facing API's 404-not-403 posture; this is
+// the participant-facing WhatsApp path, which has no ownership concept to
+// enforce.
+func (q *Queries) GetGameByJoinCode(ctx context.Context, joinCode string) (Game, error) {
+	row := q.db.QueryRow(ctx, getGameByJoinCode, joinCode)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+	)
+	return i, err
+}
+
 const getGameForOrganizer = `-- name: GetGameForOrganizer :one
 SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third FROM games
 WHERE id = $1 AND organizer_id = $2

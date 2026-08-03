@@ -20,6 +20,9 @@ type Store interface {
 	GetGameForOrganizer(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	OpenGameLobby(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	ListParticipants(ctx context.Context, gameID string) ([]gen.Participant, error)
+	GetGameByJoinCode(ctx context.Context, joinCode string) (gen.Game, error)
+	CreateParticipant(ctx context.Context, gameID, phone, displayName, role string) (gen.Participant, bool, error)
+	UpdateParticipantNameByPhone(ctx context.Context, phone, displayName string) (gen.Participant, error)
 }
 
 // Engine is the single write path for games.state (Enforcement Guidelines:

@@ -18,3 +18,14 @@ const (
 	StateLeaderboard    State = "leaderboard"
 	StateFinished       State = "finished"
 )
+
+// Role is a plain string alias, not a distinct type — same reasoning as
+// State: gen.Participant.Role is sqlc-generated as a plain string.
+type Role = string
+
+// The two canonical participant roles (DB CHECK on participants.role).
+// Only RolePlayer has a code path this story — RoleSpectator is Story 2.5's.
+const (
+	RolePlayer    Role = "player"
+	RoleSpectator Role = "spectator"
+)

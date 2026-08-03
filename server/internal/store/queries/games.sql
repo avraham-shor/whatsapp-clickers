@@ -35,3 +35,12 @@ SET state = 'lobby',
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2 AND state = 'draft'
 RETURNING *;
+
+-- Unscoped by organizer_id on purpose: a Participant's JOIN message carries
+-- no organizer context. This is architecturally distinct from the CRUD
+-- endpoints' "ownership always in the WHERE clause" doctrine above — that
+-- doctrine is about the organizer-facing API's 404-not-403 posture; this is
+-- the participant-facing WhatsApp path, which has no ownership concept to
+-- enforce.
+-- name: GetGameByJoinCode :one
+SELECT * FROM games WHERE join_code = $1;

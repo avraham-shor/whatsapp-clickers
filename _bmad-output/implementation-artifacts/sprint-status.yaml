@@ -56,7 +56,7 @@ development_status:
   2-1-whatsapp-webhook-intake-and-outbound-dispatch: done
   2-2-universal-reply-the-chat-never-goes-silent: done
   2-3-open-the-lobby-and-watch-it-live: done
-  2-4-join-the-game-with-one-whatsapp-message: backlog
+  2-4-join-the-game-with-one-whatsapp-message: done
   2-5-late-join-becomes-spectator: backlog
   epic-2-retrospective: optional
 

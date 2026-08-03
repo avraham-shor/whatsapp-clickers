@@ -2,8 +2,11 @@ package wa
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/avraham-shor/whatsapp-clickers/internal/game"
 )
 
 // canonicalHelpCopy is the Help (Universal Reply) row from EXPERIENCE.md's
@@ -28,6 +31,52 @@ type stubReply struct {
 
 func (s *stubReplier) Enqueue(to, body string) {
 	s.calls = append(s.calls, stubReply{to: to, body: body})
+}
+
+// stubRegistrar canned-answers Join/Rename and records the arguments it was
+// called with, same shape as stubReplier.
+type stubRegistrar struct {
+	joinResult  game.JoinResult
+	joinErr     error
+	joinCalls   int
+	joinCode    string
+	joinPhone   string
+	joinProfile string
+
+	renameResult game.RenameResult
+	renameErr    error
+	renameCalls  int
+	renamePhone  string
+	renameName   string
+}
+
+func (s *stubRegistrar) Join(ctx context.Context, joinCode, phone, profileName string) (game.JoinResult, error) {
+	s.joinCalls++
+	s.joinCode = joinCode
+	s.joinPhone = phone
+	s.joinProfile = profileName
+	return s.joinResult, s.joinErr
+}
+
+func (s *stubRegistrar) Rename(ctx context.Context, phone, displayName string) (game.RenameResult, error) {
+	s.renameCalls++
+	s.renamePhone = phone
+	s.renameName = displayName
+	return s.renameResult, s.renameErr
+}
+
+// stubBroadcaster records Broadcast calls.
+type stubBroadcaster struct {
+	calls []stubBroadcast
+}
+
+type stubBroadcast struct {
+	gameID   string
+	snapshot game.Snapshot
+}
+
+func (s *stubBroadcaster) Broadcast(gameID string, snapshot game.Snapshot) {
+	s.calls = append(s.calls, stubBroadcast{gameID: gameID, snapshot: snapshot})
 }
 
 // lriMark / pdiMark mirror messages_he.go's isolate constants. Written as \u
@@ -55,10 +104,6 @@ func TestInboundUniversalReplyMatrix(t *testing.T) {
 		{"plain Hebrew noise", InboundMessage{From: sender, Type: "text", TextBody: "מה זה כאן?"}, kindText},
 		{"plain Latin noise", InboundMessage{From: sender, Type: "text", TextBody: "hello?"}, kindText},
 		{"single emoji", InboundMessage{From: sender, Type: "text", TextBody: "🎉"}, kindText},
-		// JOIN and "שם:" are unrecognized text in 2.2 — story 2.4 gives them
-		// meaning. Pinned so a later reader does not read this as a bug.
-		{"JOIN code (unrecognized until 2.4)", InboundMessage{From: sender, Type: "text", TextBody: "JOIN ABC123"}, kindText},
-		{"name change (unrecognized until 2.4)", InboundMessage{From: sender, Type: "text", TextBody: "שם: רחל"}, kindText},
 		{"empty body", InboundMessage{From: sender, Type: "text", TextBody: ""}, kindEmpty},
 		{"whitespace-only body", InboundMessage{From: sender, Type: "text", TextBody: "   \t\n  "}, kindEmpty},
 		{"image", InboundMessage{From: sender, Type: "image"}, kindNonText},
@@ -76,7 +121,7 @@ func TestInboundUniversalReplyMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			replier := &stubReplier{}
 			logger, buf := newTestLogger()
-			r := NewInboundRouter(replier, logger)
+			r := NewInboundRouter(replier, &stubRegistrar{}, &stubBroadcaster{}, logger)
 
 			r.Handle(context.Background(), tc.msg)
 
@@ -135,6 +180,8 @@ func TestClassifyAlwaysReturnsRegisteredKind(t *testing.T) {
 		{Type: "sticker"},
 		{Type: ""},
 		{Type: "some_future_type", TextBody: "ignored for non-text"},
+		{Type: "text", TextBody: "JOIN COHEN24"},
+		{Type: "text", TextBody: "שם: רחל לוי"},
 	}
 	for _, msg := range msgs {
 		got := classify(msg)
@@ -148,6 +195,198 @@ func TestClassifyAlwaysReturnsRegisteredKind(t *testing.T) {
 		if !registered {
 			t.Errorf("classify(%+v) = %q, which is not in allInboundKinds", msg, got)
 		}
+	}
+}
+
+// --- Parser unit cases: parseJoinCode / parseRenameName / classify ---
+
+func TestParseJoinCode(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		wantCode string
+		wantOK   bool
+	}{
+		{"canonical", "JOIN COHEN24", "COHEN24", true},
+		{"lowercase keyword", "join cohen24", "COHEN24", true},
+		{"extra whitespace", "  JOIN   cohen24  ", "COHEN24", true},
+		{"trailing words ignored", "JOIN COHEN24 please", "COHEN24", true},
+		{"no space, not recognized", "JOINCOHEN24", "", false},
+		{"no code, not recognized", "JOIN", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, ok := parseJoinCode(tc.body)
+			if ok != tc.wantOK || code != tc.wantCode {
+				t.Errorf("parseJoinCode(%q) = (%q, %v), want (%q, %v)", tc.body, code, ok, tc.wantCode, tc.wantOK)
+			}
+			wantKind := kindText
+			if tc.wantOK {
+				wantKind = kindJoin
+			}
+			if got := classify(InboundMessage{Type: "text", TextBody: tc.body}); got != wantKind {
+				t.Errorf("classify(%q) = %q, want %q", tc.body, got, wantKind)
+			}
+		})
+	}
+}
+
+func TestParseRenameName(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		wantName string
+		wantOK   bool
+	}{
+		{"canonical", "שם: רחל לוי", "רחל לוי", true},
+		{"no space after colon", "שם:רחל", "רחל", true},
+		{"leading whitespace before prefix tolerated", "  שם: רחל", "רחל", true},
+		{"empty name, not recognized", "שם:", "", false},
+		{"whitespace-only name, not recognized", "שם:   ", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			name, ok := parseRenameName(tc.body)
+			if ok != tc.wantOK || name != tc.wantName {
+				t.Errorf("parseRenameName(%q) = (%q, %v), want (%q, %v)", tc.body, name, ok, tc.wantName, tc.wantOK)
+			}
+			wantKind := kindText
+			if tc.wantOK {
+				wantKind = kindRename
+			}
+			if got := classify(InboundMessage{Type: "text", TextBody: tc.body}); got != wantKind {
+				t.Errorf("classify(%q) = %q, want %q", tc.body, got, wantKind)
+			}
+		})
+	}
+}
+
+// --- JOIN dispatch ---
+
+const joinSender = "972501234567"
+
+func TestHandleJoinWelcomeBroadcastsWhenCreatedWithSnapshot(t *testing.T) {
+	replier := &stubReplier{}
+	broadcaster := &stubBroadcaster{}
+	snap := game.Snapshot{GameID: "game-1", ParticipantCount: 1}
+	registrar := &stubRegistrar{joinResult: game.JoinResult{Outcome: game.JoinWelcome, GameID: "game-1", DisplayName: "דנה", Created: true, Snapshot: snap}}
+	r := NewInboundRouter(replier, registrar, broadcaster, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "JOIN COHEN24", ProfileName: "דנה"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != welcomeMessage("דנה") {
+		t.Fatalf("reply = %+v, want exactly one Welcome message", replier.calls)
+	}
+	if len(broadcaster.calls) != 1 || broadcaster.calls[0].gameID != "game-1" {
+		t.Errorf("broadcast calls = %+v, want exactly one Broadcast to game-1", broadcaster.calls)
+	}
+	if registrar.joinCode != "COHEN24" {
+		t.Errorf("registrar.Join called with code %q, want %q", registrar.joinCode, "COHEN24")
+	}
+}
+
+func TestHandleJoinIdempotentRepeatSendsWelcomeWithoutBroadcast(t *testing.T) {
+	replier := &stubReplier{}
+	broadcaster := &stubBroadcaster{}
+	registrar := &stubRegistrar{joinResult: game.JoinResult{Outcome: game.JoinWelcome, GameID: "game-1", DisplayName: "דנה", Created: false}}
+	r := NewInboundRouter(replier, registrar, broadcaster, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "JOIN COHEN24"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != welcomeMessage("דנה") {
+		t.Fatalf("reply = %+v, want the same Welcome copy", replier.calls)
+	}
+	if len(broadcaster.calls) != 0 {
+		t.Errorf("broadcast calls = %+v, want none (idempotent repeat)", broadcaster.calls)
+	}
+}
+
+func TestHandleJoinPreLobbyDoesNotBroadcast(t *testing.T) {
+	replier := &stubReplier{}
+	broadcaster := &stubBroadcaster{}
+	registrar := &stubRegistrar{joinResult: game.JoinResult{Outcome: game.JoinPreLobby, GameID: "game-1"}}
+	r := NewInboundRouter(replier, registrar, broadcaster, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "JOIN COHEN24"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != preLobbyMessage() {
+		t.Fatalf("reply = %+v, want the Pre-lobby message", replier.calls)
+	}
+	if len(broadcaster.calls) != 0 {
+		t.Errorf("broadcast calls = %+v, want none", broadcaster.calls)
+	}
+}
+
+func TestHandleJoinInvalidCodeSendsInvalidCodeMessageWithUppercasedCode(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{joinErr: game.ErrInvalidJoinCode}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "join wrongcode"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != invalidCodeMessage("WRONGCODE") {
+		t.Fatalf("reply = %+v, want the Invalid-code message with the uppercased code", replier.calls)
+	}
+}
+
+func TestHandleJoinGameStartedSendsHelp(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{joinErr: game.ErrGameStarted}
+	logger, buf := newTestLogger()
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, logger)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "JOIN COHEN24"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != helpMessage() {
+		t.Fatalf("reply = %+v, want the Help message", replier.calls)
+	}
+	if strings.Contains(buf.String(), "level=WARN") {
+		t.Errorf("ErrGameStarted is a documented gap, not a failure — must not WARN: %s", buf.String())
+	}
+}
+
+func TestHandleJoinUnexpectedErrorSendsHelpAndWarns(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{joinErr: errors.New("boom")}
+	logger, buf := newTestLogger()
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, logger)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "JOIN COHEN24"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != helpMessage() {
+		t.Fatalf("reply = %+v, want the Help message", replier.calls)
+	}
+	if !strings.Contains(buf.String(), "level=WARN") {
+		t.Errorf("an unexpected registrar error must WARN: %s", buf.String())
+	}
+}
+
+// --- שם: (rename) dispatch ---
+
+func TestHandleRenameSuccessSendsNameUpdatedMessage(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{renameResult: game.RenameResult{DisplayName: "דוד"}}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "שם: דוד"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != nameUpdatedMessage("דוד") {
+		t.Fatalf("reply = %+v, want the Name-updated message", replier.calls)
+	}
+	if registrar.renameName != "דוד" {
+		t.Errorf("registrar.Rename called with name %q, want %q", registrar.renameName, "דוד")
+	}
+}
+
+func TestHandleRenameUnregisteredSenderSendsHelp(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{renameErr: game.ErrParticipantNotFound}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "שם: דוד"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != helpMessage() {
+		t.Fatalf("reply = %+v, want the Help message", replier.calls)
 	}
 }
 
@@ -178,7 +417,7 @@ func TestHelpMessageIsolatesLTRTokens(t *testing.T) {
 func TestInboundEmptySenderDoesNotReply(t *testing.T) {
 	replier := &stubReplier{}
 	logger, buf := newTestLogger()
-	r := NewInboundRouter(replier, logger)
+	r := NewInboundRouter(replier, &stubRegistrar{}, &stubBroadcaster{}, logger)
 
 	r.Handle(context.Background(), InboundMessage{From: "", Type: "text", TextBody: "hello", WaMessageID: leakyWamid})
 
@@ -196,7 +435,7 @@ func TestInboundEmptySenderDoesNotReply(t *testing.T) {
 func TestInboundLogDisciplineRedactsPII(t *testing.T) {
 	replier := &stubReplier{}
 	logger, buf := newTestLogger()
-	r := NewInboundRouter(replier, logger)
+	r := NewInboundRouter(replier, &stubRegistrar{}, &stubBroadcaster{}, logger)
 
 	r.Handle(context.Background(), InboundMessage{
 		From:        syntheticMSISDN,
@@ -227,7 +466,7 @@ func TestInboundLogDisciplineRedactsPII(t *testing.T) {
 // compile-time assertion in inbound.go enforces: the router is exactly the
 // seam webhook.go calls.
 func TestInboundRouterSatisfiesInboundHandler(t *testing.T) {
-	var h InboundHandler = NewInboundRouter(&stubReplier{}, nil)
+	var h InboundHandler = NewInboundRouter(&stubReplier{}, &stubRegistrar{}, &stubBroadcaster{}, nil)
 	if h == nil {
 		t.Fatal("InboundRouter does not satisfy InboundHandler")
 	}

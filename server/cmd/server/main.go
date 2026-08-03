@@ -110,14 +110,16 @@ func run(logger *slog.Logger) error {
 		dispatcher.Run(dispatchCtx)
 	}()
 
-	inboundRouter := wa.NewInboundRouter(dispatcher, logger)
-	// st satisfies Deduper directly (MarkWaMessageProcessed).
-	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, cfg.WhatsAppPhoneNumberID, st, inboundRouter, logger)
-
-	// st satisfies game.Store (GetGameForOrganizer, OpenGameLobby, ListParticipants).
+	// st satisfies game.Store (GetGameForOrganizer, OpenGameLobby, ListParticipants,
+	// GetGameByJoinCode, CreateParticipant, UpdateParticipantNameByPhone).
 	engine := game.NewEngine(st, cfg.WhatsAppDisplayNumber, logger)
 	hub := ws.NewHub(logger)
 	wsHandler := ws.NewHandler(authSvc, engine, hub, logger)
+
+	// *game.Engine satisfies wa.Registrar, *ws.Hub satisfies wa.SnapshotBroadcaster.
+	inboundRouter := wa.NewInboundRouter(dispatcher, engine, hub, logger)
+	// st satisfies Deduper directly (MarkWaMessageProcessed).
+	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, cfg.WhatsAppPhoneNumberID, st, inboundRouter, logger)
 
 	// st satisfies both Pinger and GameStore.
 	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler)

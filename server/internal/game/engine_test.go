@@ -26,6 +26,22 @@ type stubStore struct {
 
 	participants    []gen.Participant
 	participantsErr error
+
+	getGameByJoinCodeResult gen.Game
+	getGameByJoinCodeErr    error
+	getGameByJoinCodeCalls  int
+
+	createParticipantResult  gen.Participant
+	createParticipantCreated bool
+	createParticipantErr     error
+	createParticipantCalls   int
+	createParticipantRole    string
+
+	updateParticipantNameByPhoneResult gen.Participant
+	updateParticipantNameByPhoneErr    error
+	updateParticipantNameByPhoneCalls  int
+	updateParticipantNameByPhonePhone  string
+	updateParticipantNameByPhoneName   string
 }
 
 func (s *stubStore) GetGameForOrganizer(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
@@ -39,6 +55,39 @@ func (s *stubStore) OpenGameLobby(ctx context.Context, gameID, organizerID strin
 
 func (s *stubStore) ListParticipants(ctx context.Context, gameID string) ([]gen.Participant, error) {
 	return s.participants, s.participantsErr
+}
+
+func (s *stubStore) GetGameByJoinCode(ctx context.Context, joinCode string) (gen.Game, error) {
+	s.getGameByJoinCodeCalls++
+	return s.getGameByJoinCodeResult, s.getGameByJoinCodeErr
+}
+
+func (s *stubStore) CreateParticipant(ctx context.Context, gameID, phone, displayName, role string) (gen.Participant, bool, error) {
+	s.createParticipantCalls++
+	s.createParticipantRole = role
+	if s.createParticipantErr != nil {
+		return gen.Participant{}, false, s.createParticipantErr
+	}
+	p := s.createParticipantResult
+	if s.createParticipantCreated {
+		// A fresh INSERT ... RETURNING echoes back exactly what was
+		// written — lets tests assert Join correctly threads the resolved
+		// name through without the stub needing to duplicate that logic.
+		p.DisplayName = displayName
+	}
+	// On a conflict (created == false), the real store's ON CONFLICT DO
+	// NOTHING + refetch returns the EXISTING row's stored name, not the
+	// name this call was asked to write — createParticipantResult.DisplayName
+	// stands in for that pre-existing value (AC-3: idempotent repeat replies
+	// with the current stored name, not necessarily the name resent).
+	return p, s.createParticipantCreated, nil
+}
+
+func (s *stubStore) UpdateParticipantNameByPhone(ctx context.Context, phone, displayName string) (gen.Participant, error) {
+	s.updateParticipantNameByPhoneCalls++
+	s.updateParticipantNameByPhonePhone = phone
+	s.updateParticipantNameByPhoneName = displayName
+	return s.updateParticipantNameByPhoneResult, s.updateParticipantNameByPhoneErr
 }
 
 func draftStub() *stubStore {

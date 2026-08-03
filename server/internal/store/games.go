@@ -119,3 +119,14 @@ func (s *Store) OpenGameLobby(ctx context.Context, gameID, organizerID string) (
 	}
 	return game, err
 }
+
+// GetGameByJoinCode looks up a game by its JOIN Code, unscoped by organizer:
+// the WhatsApp JOIN path carries no organizer context. A missing/unknown
+// code is ErrNotFound.
+func (s *Store) GetGameByJoinCode(ctx context.Context, joinCode string) (gen.Game, error) {
+	game, err := s.q.GetGameByJoinCode(ctx, joinCode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
