@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store/gen"
@@ -13,6 +14,10 @@ const (
 	testGameID      = "11111111-2222-3333-4444-555555555555"
 	testOrganizerID = "org-1"
 )
+
+// testCutoff is a fixed, arbitrary answer_cutoff_at value used across the
+// question-progress tests below.
+var testCutoff = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 // stubStore implements Store with canned results and records every call so
 // tests can assert what reached (or didn't reach) the store.
@@ -31,17 +36,43 @@ type stubStore struct {
 	getGameByJoinCodeErr    error
 	getGameByJoinCodeCalls  int
 
-	createParticipantResult  gen.Participant
-	createParticipantCreated bool
-	createParticipantErr     error
-	createParticipantCalls   int
-	createParticipantRole    string
+	createParticipantResult        gen.Participant
+	createParticipantCreated       bool
+	createParticipantErr           error
+	createParticipantCalls         int
+	createParticipantRole          string
+	createParticipantAllowedStates []string
 
 	updateParticipantNameByPhoneResult gen.Participant
 	updateParticipantNameByPhoneErr    error
 	updateParticipantNameByPhoneCalls  int
 	updateParticipantNameByPhonePhone  string
 	updateParticipantNameByPhoneName   string
+
+	listQuestionsByGameResult []gen.Question
+	listQuestionsByGameErr    error
+	listQuestionsByGameCalls  int
+
+	startGameFirstQuestionResult gen.Game
+	startGameFirstQuestionErr    error
+	startGameFirstQuestionCalls  int
+
+	closeCurrentQuestionResult gen.Game
+	closeCurrentQuestionErr    error
+	closeCurrentQuestionCalls  int
+
+	revealCurrentQuestionResult gen.Game
+	revealCurrentQuestionErr    error
+	revealCurrentQuestionCalls  int
+
+	openNextQuestionResult   gen.Game
+	openNextQuestionErr      error
+	openNextQuestionCalls    int
+	openNextQuestionPosition int32
+
+	finishGameResult gen.Game
+	finishGameErr    error
+	finishGameCalls  int
 }
 
 func (s *stubStore) GetGameForOrganizer(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
@@ -62,9 +93,10 @@ func (s *stubStore) GetGameByJoinCode(ctx context.Context, joinCode string) (gen
 	return s.getGameByJoinCodeResult, s.getGameByJoinCodeErr
 }
 
-func (s *stubStore) CreateParticipant(ctx context.Context, gameID, phone, displayName, role string) (gen.Participant, bool, error) {
+func (s *stubStore) CreateParticipant(ctx context.Context, gameID, phone, displayName, role string, allowedStates []string) (gen.Participant, bool, error) {
 	s.createParticipantCalls++
 	s.createParticipantRole = role
+	s.createParticipantAllowedStates = allowedStates
 	if s.createParticipantErr != nil {
 		return gen.Participant{}, false, s.createParticipantErr
 	}
@@ -90,9 +122,120 @@ func (s *stubStore) UpdateParticipantNameByPhone(ctx context.Context, phone, dis
 	return s.updateParticipantNameByPhoneResult, s.updateParticipantNameByPhoneErr
 }
 
+func (s *stubStore) ListQuestionsByGame(ctx context.Context, gameID, organizerID string) ([]gen.Question, error) {
+	s.listQuestionsByGameCalls++
+	return s.listQuestionsByGameResult, s.listQuestionsByGameErr
+}
+
+func (s *stubStore) StartGameFirstQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	s.startGameFirstQuestionCalls++
+	return s.startGameFirstQuestionResult, s.startGameFirstQuestionErr
+}
+
+func (s *stubStore) CloseCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	s.closeCurrentQuestionCalls++
+	return s.closeCurrentQuestionResult, s.closeCurrentQuestionErr
+}
+
+func (s *stubStore) RevealCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	s.revealCurrentQuestionCalls++
+	return s.revealCurrentQuestionResult, s.revealCurrentQuestionErr
+}
+
+func (s *stubStore) OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error) {
+	s.openNextQuestionCalls++
+	s.openNextQuestionPosition = position
+	return s.openNextQuestionResult, s.openNextQuestionErr
+}
+
+func (s *stubStore) FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	s.finishGameCalls++
+	return s.finishGameResult, s.finishGameErr
+}
+
 func draftStub() *stubStore {
 	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateDraft, JoinCode: "AB2CD3"}
 	return &stubStore{game: g, openGameLobbyResult: gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateLobby, JoinCode: "AB2CD3"}}
+}
+
+// oneQuestion is a single mcq question at position 1, reused across the
+// lobby/question-open/question-closed stubs below.
+func oneQuestion() []gen.Question {
+	return []gen.Question{
+		{ID: "q1", GameID: testGameID, Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20},
+	}
+}
+
+// twoQuestions is two mcq questions at positions 1 and 2.
+func twoQuestions() []gen.Question {
+	return []gen.Question{
+		{ID: "q1", GameID: testGameID, Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20},
+		{ID: "q2", GameID: testGameID, Position: 2, Type: "mcq", Text: "2+2?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20},
+	}
+}
+
+func lobbyStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateLobby, JoinCode: "AB2CD3"}
+	return &stubStore{
+		game:                      g,
+		listQuestionsByGameResult: oneQuestion(),
+		startGameFirstQuestionResult: gen.Game{
+			ID: testGameID, OrganizerID: testOrganizerID, State: StateQuestionOpen, JoinCode: "AB2CD3",
+			CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff,
+		},
+	}
+}
+
+func questionOpenStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateQuestionOpen, JoinCode: "AB2CD3", CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff}
+	return &stubStore{
+		game:                      g,
+		listQuestionsByGameResult: oneQuestion(),
+		closeCurrentQuestionResult: gen.Game{
+			ID: testGameID, OrganizerID: testOrganizerID, State: StateQuestionClosed, JoinCode: "AB2CD3",
+			CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff,
+		},
+	}
+}
+
+func questionClosedStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateQuestionClosed, JoinCode: "AB2CD3", CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff}
+	return &stubStore{
+		game:                      g,
+		listQuestionsByGameResult: oneQuestion(),
+		revealCurrentQuestionResult: gen.Game{
+			ID: testGameID, OrganizerID: testOrganizerID, State: StateRevealed, JoinCode: "AB2CD3",
+			CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff,
+		},
+	}
+}
+
+// revealedStub is revealed with a second question waiting at position 2.
+func revealedStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateRevealed, JoinCode: "AB2CD3", CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff}
+	return &stubStore{
+		game:                      g,
+		listQuestionsByGameResult: twoQuestions(),
+		openNextQuestionResult: gen.Game{
+			ID: testGameID, OrganizerID: testOrganizerID, State: StateQuestionOpen, JoinCode: "AB2CD3",
+			CurrentQuestionPosition: 2, AnswerCutoffAt: testCutoff,
+		},
+	}
+}
+
+// revealedLastQuestionStub is revealed with no question waiting at position 2.
+func revealedLastQuestionStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateRevealed, JoinCode: "AB2CD3", CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff}
+	return &stubStore{
+		game:                      g,
+		listQuestionsByGameResult: oneQuestion(),
+		// FinishGame resets current_question_position back to 0 (mirrors
+		// draft/lobby/finished — see the migration's own invariant), so a
+		// finished game must never carry a stale currentQuestion.
+		finishGameResult: gen.Game{
+			ID: testGameID, OrganizerID: testOrganizerID, State: StateFinished, JoinCode: "AB2CD3",
+		},
+	}
 }
 
 func TestOpenLobbyFromDraftReturnsLobbySnapshot(t *testing.T) {
@@ -111,6 +254,9 @@ func TestOpenLobbyFromDraftReturnsLobbySnapshot(t *testing.T) {
 	}
 	if snap.ParticipantCount != 0 || snap.Participants == nil || len(snap.Participants) != 0 {
 		t.Errorf("Participants = %+v, want a non-nil empty slice this story", snap.Participants)
+	}
+	if snap.CurrentQuestion != nil {
+		t.Errorf("CurrentQuestion = %+v, want nil in lobby", snap.CurrentQuestion)
 	}
 	if st.openGameLobbyCalls != 1 {
 		t.Errorf("OpenGameLobby called %d times, want 1", st.openGameLobbyCalls)
@@ -209,5 +355,304 @@ func TestSnapshotMissingOrForeignGameReturnsErrNotFound(t *testing.T) {
 	_, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("Snapshot() err = %v, want store.ErrNotFound", err)
+	}
+}
+
+// --- StartGame ---
+
+func TestStartGameFromLobbyReturnsQuestionOpenSnapshot(t *testing.T) {
+	st := lobbyStub()
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.StartGame(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("StartGame() err = %v, want nil", err)
+	}
+	if snap.State != StateQuestionOpen {
+		t.Errorf("State = %q, want question_open", snap.State)
+	}
+	if snap.QuestionCount != 1 {
+		t.Errorf("QuestionCount = %d, want 1", snap.QuestionCount)
+	}
+	if snap.CurrentQuestion == nil || snap.CurrentQuestion.ID != "q1" || snap.CurrentQuestion.Position != 1 {
+		t.Fatalf("CurrentQuestion = %+v, want q1 at position 1", snap.CurrentQuestion)
+	}
+	if snap.CurrentQuestion.AnswerCutoffAt != testCutoff.Format(time.RFC3339) {
+		t.Errorf("AnswerCutoffAt = %q, want %q", snap.CurrentQuestion.AnswerCutoffAt, testCutoff.Format(time.RFC3339))
+	}
+	if st.startGameFirstQuestionCalls != 1 {
+		t.Errorf("StartGameFirstQuestion called %d times, want 1", st.startGameFirstQuestionCalls)
+	}
+}
+
+func TestStartGameFromNonLobbyReturnsErrNotLobbyWithoutWriting(t *testing.T) {
+	st := lobbyStub()
+	st.game.State = StateDraft
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.StartGame(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotLobby) {
+		t.Fatalf("StartGame() err = %v, want ErrNotLobby", err)
+	}
+	if st.startGameFirstQuestionCalls != 0 {
+		t.Errorf("StartGameFirstQuestion called %d times, want 0", st.startGameFirstQuestionCalls)
+	}
+	if st.listQuestionsByGameCalls != 0 {
+		t.Errorf("ListQuestionsByGame called %d times, want 0 (rejected before checking questions)", st.listQuestionsByGameCalls)
+	}
+}
+
+func TestStartGameWithNoQuestionsReturnsErrNoQuestionsWithoutWriting(t *testing.T) {
+	st := lobbyStub()
+	st.listQuestionsByGameResult = nil
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.StartGame(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNoQuestions) {
+		t.Fatalf("StartGame() err = %v, want ErrNoQuestions", err)
+	}
+	if st.startGameFirstQuestionCalls != 0 {
+		t.Errorf("StartGameFirstQuestion called %d times, want 0", st.startGameFirstQuestionCalls)
+	}
+}
+
+func TestStartGameRaceLossReturnsErrNotLobby(t *testing.T) {
+	st := lobbyStub()
+	st.startGameFirstQuestionErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.StartGame(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotLobby) {
+		t.Fatalf("StartGame() err = %v, want ErrNotLobby (race loss reinterpreted)", err)
+	}
+}
+
+func TestStartGameMissingOrForeignGameReturnsErrNotFound(t *testing.T) {
+	st := &stubStore{gameErr: store.ErrNotFound}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.StartGame(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("StartGame() err = %v, want store.ErrNotFound", err)
+	}
+}
+
+// --- CloseQuestion ---
+
+func TestCloseQuestionFromQuestionOpenReturnsQuestionClosedSnapshot(t *testing.T) {
+	st := questionOpenStub()
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.CloseQuestion(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("CloseQuestion() err = %v, want nil", err)
+	}
+	if snap.State != StateQuestionClosed {
+		t.Errorf("State = %q, want question_closed", snap.State)
+	}
+	if st.closeCurrentQuestionCalls != 1 {
+		t.Errorf("CloseCurrentQuestion called %d times, want 1", st.closeCurrentQuestionCalls)
+	}
+}
+
+func TestCloseQuestionFromNonQuestionOpenReturnsErrNotQuestionOpenWithoutWriting(t *testing.T) {
+	st := questionOpenStub()
+	st.game.State = StateLobby
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.CloseQuestion(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotQuestionOpen) {
+		t.Fatalf("CloseQuestion() err = %v, want ErrNotQuestionOpen", err)
+	}
+	if st.closeCurrentQuestionCalls != 0 {
+		t.Errorf("CloseCurrentQuestion called %d times, want 0", st.closeCurrentQuestionCalls)
+	}
+}
+
+func TestCloseQuestionRaceLossReturnsErrNotQuestionOpen(t *testing.T) {
+	st := questionOpenStub()
+	st.closeCurrentQuestionErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.CloseQuestion(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotQuestionOpen) {
+		t.Fatalf("CloseQuestion() err = %v, want ErrNotQuestionOpen (race loss reinterpreted)", err)
+	}
+}
+
+// --- Reveal ---
+
+func TestRevealFromQuestionClosedReturnsRevealedSnapshot(t *testing.T) {
+	st := questionClosedStub()
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Reveal() err = %v, want nil", err)
+	}
+	if snap.State != StateRevealed {
+		t.Errorf("State = %q, want revealed", snap.State)
+	}
+	if st.revealCurrentQuestionCalls != 1 {
+		t.Errorf("RevealCurrentQuestion called %d times, want 1", st.revealCurrentQuestionCalls)
+	}
+}
+
+func TestRevealFromNonQuestionClosedReturnsErrNotQuestionClosedWithoutWriting(t *testing.T) {
+	st := questionClosedStub()
+	st.game.State = StateQuestionOpen
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotQuestionClosed) {
+		t.Fatalf("Reveal() err = %v, want ErrNotQuestionClosed", err)
+	}
+	if st.revealCurrentQuestionCalls != 0 {
+		t.Errorf("RevealCurrentQuestion called %d times, want 0", st.revealCurrentQuestionCalls)
+	}
+}
+
+func TestRevealRaceLossReturnsErrNotQuestionClosed(t *testing.T) {
+	st := questionClosedStub()
+	st.revealCurrentQuestionErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotQuestionClosed) {
+		t.Fatalf("Reveal() err = %v, want ErrNotQuestionClosed (race loss reinterpreted)", err)
+	}
+}
+
+// --- NextQuestion ---
+
+func TestNextQuestionOpensNextQuestionWhenOneExists(t *testing.T) {
+	st := revealedStub()
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("NextQuestion() err = %v, want nil", err)
+	}
+	if snap.State != StateQuestionOpen {
+		t.Errorf("State = %q, want question_open", snap.State)
+	}
+	if snap.CurrentQuestion == nil || snap.CurrentQuestion.Position != 2 {
+		t.Fatalf("CurrentQuestion = %+v, want position 2", snap.CurrentQuestion)
+	}
+	if st.openNextQuestionCalls != 1 || st.openNextQuestionPosition != 2 {
+		t.Errorf("OpenNextQuestion called %d times with position %d, want 1 call at position 2", st.openNextQuestionCalls, st.openNextQuestionPosition)
+	}
+	if st.finishGameCalls != 0 {
+		t.Errorf("FinishGame called %d times, want 0", st.finishGameCalls)
+	}
+}
+
+func TestNextQuestionFinishesGameWhenNoNextQuestionExists(t *testing.T) {
+	st := revealedLastQuestionStub()
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("NextQuestion() err = %v, want nil", err)
+	}
+	if snap.State != StateFinished {
+		t.Errorf("State = %q, want finished", snap.State)
+	}
+	if snap.CurrentQuestion != nil {
+		t.Errorf("CurrentQuestion = %+v, want nil once finished", snap.CurrentQuestion)
+	}
+	if st.finishGameCalls != 1 {
+		t.Errorf("FinishGame called %d times, want 1", st.finishGameCalls)
+	}
+	if st.openNextQuestionCalls != 0 {
+		t.Errorf("OpenNextQuestion called %d times, want 0", st.openNextQuestionCalls)
+	}
+}
+
+func TestNextQuestionFromNonRevealedReturnsErrNotRevealedWithoutWriting(t *testing.T) {
+	st := revealedStub()
+	st.game.State = StateQuestionClosed
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotRevealed) {
+		t.Fatalf("NextQuestion() err = %v, want ErrNotRevealed", err)
+	}
+	if st.openNextQuestionCalls != 0 || st.finishGameCalls != 0 {
+		t.Errorf("write called (open=%d finish=%d), want 0/0", st.openNextQuestionCalls, st.finishGameCalls)
+	}
+}
+
+func TestNextQuestionRaceLossReturnsErrNotRevealed(t *testing.T) {
+	st := revealedStub()
+	st.openNextQuestionErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotRevealed) {
+		t.Fatalf("NextQuestion() err = %v, want ErrNotRevealed (race loss reinterpreted)", err)
+	}
+}
+
+// --- StopGame ---
+
+func TestStopGameAllowedStatesFinishTheGame(t *testing.T) {
+	for _, state := range []State{StateQuestionOpen, StateQuestionClosed, StateRevealed} {
+		st := &stubStore{
+			game:             gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: state, JoinCode: "AB2CD3"},
+			finishGameResult: gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateFinished, JoinCode: "AB2CD3"},
+		}
+		e := NewEngine(st, "+972 50-000-0000", nil)
+
+		snap, err := e.StopGame(context.Background(), testGameID, testOrganizerID)
+		if err != nil {
+			t.Errorf("StopGame() from %s err = %v, want nil", state, err)
+			continue
+		}
+		if snap.State != StateFinished {
+			t.Errorf("StopGame() from %s state = %q, want finished", state, snap.State)
+		}
+		if snap.CurrentQuestion != nil {
+			t.Errorf("StopGame() from %s: CurrentQuestion = %+v, want nil once finished", state, snap.CurrentQuestion)
+		}
+		if st.finishGameCalls != 1 {
+			t.Errorf("StopGame() from %s: FinishGame called %d times, want 1", state, st.finishGameCalls)
+		}
+	}
+}
+
+func TestStopGameDisallowedStatesReturnErrNotStoppableWithoutWriting(t *testing.T) {
+	for _, state := range []State{StateDraft, StateLobby, StateFinished} {
+		st := &stubStore{game: gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: state, JoinCode: "AB2CD3"}}
+		e := NewEngine(st, "+972 50-000-0000", nil)
+
+		_, err := e.StopGame(context.Background(), testGameID, testOrganizerID)
+		if !errors.Is(err, ErrNotStoppable) {
+			t.Errorf("StopGame() from %s err = %v, want ErrNotStoppable", state, err)
+		}
+		if st.finishGameCalls != 0 {
+			t.Errorf("StopGame() from %s: FinishGame called %d times, want 0", state, st.finishGameCalls)
+		}
+	}
+}
+
+func TestStopGameRaceLossReturnsErrNotStoppable(t *testing.T) {
+	st := questionOpenStub()
+	st.finishGameErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.StopGame(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotStoppable) {
+		t.Fatalf("StopGame() err = %v, want ErrNotStoppable (race loss reinterpreted)", err)
+	}
+}
+
+func TestStopGameMissingOrForeignGameReturnsErrNotFound(t *testing.T) {
+	st := &stubStore{gameErr: store.ErrNotFound}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.StopGame(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("StopGame() err = %v, want store.ErrNotFound", err)
 	}
 }

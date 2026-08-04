@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-07-10
-last_updated: 2026-08-03
+last_updated: 2026-08-04
 project: whatsapp-clickers
 project_key: NOKEY
 tracking_system: file-system
@@ -52,17 +52,17 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: WhatsApp Front Door — Registration & Inbox
-  epic-2: in-progress
+  epic-2: done
   2-1-whatsapp-webhook-intake-and-outbound-dispatch: done
   2-2-universal-reply-the-chat-never-goes-silent: done
   2-3-open-the-lobby-and-watch-it-live: done
   2-4-join-the-game-with-one-whatsapp-message: done
   2-5-late-join-becomes-spectator: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # Epic 3: Live Gameplay — A Complete Game Runs in WhatsApp
-  epic-3: backlog
-  3-1-run-the-game-live-control-state-machine: backlog
+  epic-3: in-progress
+  3-1-run-the-game-live-control-state-machine: done
   3-2-question-delivery-to-every-phone: backlog
   3-3-answer-intake-with-immediate-acknowledgment: backlog
   3-4-grading-pipeline-mcq-and-exact-match: backlog

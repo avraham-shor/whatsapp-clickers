@@ -9,13 +9,32 @@ import (
 	"context"
 )
 
+const closeQuestionPositionGap = `-- name: CloseQuestionPositionGap :exec
+UPDATE questions
+SET position = position - 1, updated_at = now()
+WHERE game_id = $1 AND position > $2
+`
+
+type CloseQuestionPositionGapParams struct {
+	GameID   string
+	Position int32
+}
+
+// Closes the gap DeleteQuestion just left, run in the same transaction
+// right after it (see DeleteQuestion's comment) — every question after the
+// deleted position shifts down by one, restoring the dense 1..N invariant.
+func (q *Queries) CloseQuestionPositionGap(ctx context.Context, arg CloseQuestionPositionGapParams) error {
+	_, err := q.db.Exec(ctx, closeQuestionPositionGap, arg.GameID, arg.Position)
+	return err
+}
+
 const createQuestion = `-- name: CreateQuestion :one
 INSERT INTO questions (game_id, position, type, text, options, correct_option, accepted_answers, time_limit_seconds)
 SELECT g.id,
        COALESCE((SELECT max(q.position) FROM questions q WHERE q.game_id = g.id), 0) + 1,
        $1, $2, $3, $4, $5, $6
 FROM games g
-WHERE g.id = $7 AND g.organizer_id = $8
+WHERE g.id = $7 AND g.organizer_id = $8 AND g.state = 'draft'
 RETURNING id, game_id, position, type, text, options, correct_option, accepted_answers, time_limit_seconds, created_at, updated_at, imported_from_bank
 `
 
@@ -31,7 +50,11 @@ type CreateQuestionParams struct {
 }
 
 // Appends at the end of the game: position = MAX+1 (no row when the game
-// is missing or foreign, which surfaces as pgx.ErrNoRows on :one).
+// is missing, foreign, or non-draft, which surfaces as pgx.ErrNoRows on
+// :one). The draft guard closes the check-then-write race between
+// httpapi's requireDraftGame read and this INSERT (deferred from 1.4/1.5,
+// closed by story 3.1's code review — now reachable since 3.1 lets a game
+// leave draft).
 func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error) {
 	row := q.db.QueryRow(ctx, createQuestion,
 		arg.Type,
@@ -61,13 +84,15 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 	return i, err
 }
 
-const deleteQuestion = `-- name: DeleteQuestion :execrows
+const deleteQuestion = `-- name: DeleteQuestion :one
 DELETE FROM questions q
 USING games g
 WHERE q.id = $1
   AND q.game_id = $2
   AND g.id = q.game_id
   AND g.organizer_id = $3
+  AND g.state = 'draft'
+RETURNING q.position
 `
 
 type DeleteQuestionParams struct {
@@ -76,12 +101,17 @@ type DeleteQuestionParams struct {
 	OrganizerID string
 }
 
-func (q *Queries) DeleteQuestion(ctx context.Context, arg DeleteQuestionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteQuestion, arg.ID, arg.GameID, arg.OrganizerID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// Deletes one question and returns its position so the caller
+// (store/questions.go, same transaction) can close the gap it leaves —
+// StartGame/NextQuestion (story 3.1) match position by exact equality, and
+// a gap left the game permanently unstartable or silently short-circuited
+// past the gap. The draft guard closes the same check-then-write race as
+// CreateQuestion.
+func (q *Queries) DeleteQuestion(ctx context.Context, arg DeleteQuestionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, deleteQuestion, arg.ID, arg.GameID, arg.OrganizerID)
+	var position int32
+	err := row.Scan(&position)
+	return position, err
 }
 
 const listQuestionsByGame = `-- name: ListQuestionsByGame :many
@@ -146,6 +176,7 @@ WHERE q.id = $6
   AND q.type = $8
   AND g.id = q.game_id
   AND g.organizer_id = $9
+  AND g.state = 'draft'
 RETURNING q.id, q.game_id, q.position, q.type, q.text, q.options, q.correct_option, q.accepted_answers, q.time_limit_seconds, q.created_at, q.updated_at, q.imported_from_bank
 `
 
@@ -162,7 +193,8 @@ type UpdateQuestionParams struct {
 }
 
 // type is immutable after creation: it appears in WHERE, never in SET, so a
-// type-mismatched update matches no row.
+// type-mismatched update matches no row. The draft guard closes the same
+// check-then-write race as CreateQuestion.
 func (q *Queries) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) (Question, error) {
 	row := q.db.QueryRow(ctx, updateQuestion,
 		arg.Text,
@@ -201,6 +233,7 @@ WHERE q.id = $2
   AND q.game_id = $3
   AND g.id = q.game_id
   AND g.organizer_id = $4
+  AND g.state = 'draft'
 `
 
 type UpdateQuestionPositionParams struct {
@@ -210,6 +243,10 @@ type UpdateQuestionPositionParams struct {
 	OrganizerID string
 }
 
+// The draft guard closes the same check-then-write race as CreateQuestion;
+// ReorderQuestions' own transaction (store/questions.go) also re-checks the
+// game's state up front for the common case, but a state change landing
+// mid-loop is still caught here since each row's guard is evaluated fresh.
 func (q *Queries) UpdateQuestionPosition(ctx context.Context, arg UpdateQuestionPositionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateQuestionPosition,
 		arg.Position,

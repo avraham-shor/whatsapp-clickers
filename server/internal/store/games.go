@@ -130,3 +130,59 @@ func (s *Store) GetGameByJoinCode(ctx context.Context, joinCode string) (gen.Gam
 	}
 	return game, err
 }
+
+// StartGameFirstQuestion transitions a game from lobby to question_open on
+// its first question; a foreign/missing game, one not in lobby, or one with
+// no questions (including a concurrent racer that already won the
+// transition) is ErrNotFound — the game package disambiguates which.
+func (s *Store) StartGameFirstQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	game, err := s.q.StartGameFirstQuestion(ctx, gen.StartGameFirstQuestionParams{ID: gameID, OrganizerID: organizerID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
+
+// CloseCurrentQuestion transitions a game from question_open to
+// question_closed; a foreign/missing game or one not question_open
+// (including a lost race) is ErrNotFound.
+func (s *Store) CloseCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	game, err := s.q.CloseCurrentQuestion(ctx, gen.CloseCurrentQuestionParams{ID: gameID, OrganizerID: organizerID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
+
+// RevealCurrentQuestion transitions a game from question_closed to
+// revealed; a foreign/missing game or one not question_closed (including a
+// lost race) is ErrNotFound.
+func (s *Store) RevealCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	game, err := s.q.RevealCurrentQuestion(ctx, gen.RevealCurrentQuestionParams{ID: gameID, OrganizerID: organizerID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
+
+// OpenNextQuestion transitions a game from revealed to question_open on the
+// question at position; a foreign/missing game, one not revealed, or one
+// with no question at position (including a lost race) is ErrNotFound.
+func (s *Store) OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error) {
+	game, err := s.q.OpenNextQuestion(ctx, gen.OpenNextQuestionParams{ID: gameID, OrganizerID: organizerID, Position: position})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
+
+// FinishGame transitions a game to finished from any of question_open,
+// question_closed, or revealed; a foreign/missing game or one in another
+// state (including a lost race) is ErrNotFound.
+func (s *Store) FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	game, err := s.q.FinishGame(ctx, gen.FinishGameParams{ID: gameID, OrganizerID: organizerID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}

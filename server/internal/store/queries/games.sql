@@ -44,3 +44,68 @@ RETURNING *;
 -- enforce.
 -- name: GetGameByJoinCode :one
 SELECT * FROM games WHERE join_code = $1;
+
+-- Starts the game: opens the question at position 1 and computes its
+-- cutoff from that question's time limit. Zero rows covers both "not in
+-- lobby" and "no questions" (no matching position-1 row) in one statement —
+-- the engine disambiguates which one happened via a prior read, exactly
+-- like OpenGameLobby disambiguates a lost race from a missing game.
+-- name: StartGameFirstQuestion :one
+UPDATE games g
+SET state = 'question_open',
+    current_question_position = 1,
+    answer_cutoff_at = now() + (q.time_limit_seconds || ' seconds')::interval,
+    updated_at = now()
+FROM questions q
+WHERE g.id = $1 AND g.organizer_id = $2 AND g.state = 'lobby'
+  AND q.game_id = g.id AND q.position = 1
+RETURNING g.*;
+
+-- An early explicit close tightens the cutoff to now(); a close arriving
+-- after the timer already elapsed must not push the cutoff later, hence
+-- LEAST rather than a plain overwrite.
+-- name: CloseCurrentQuestion :one
+UPDATE games
+SET state = 'question_closed',
+    answer_cutoff_at = LEAST(answer_cutoff_at, now()),
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state = 'question_open'
+RETURNING *;
+
+-- No grading-completion gate here: the answers/grading tables don't exist
+-- until Stories 3.3-3.6; Story 3.4 is where "activates only once every
+-- received answer is graded" gets added.
+-- name: RevealCurrentQuestion :one
+UPDATE games
+SET state = 'revealed',
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state = 'question_closed'
+RETURNING *;
+
+-- Same shape as StartGameFirstQuestion, guarded from 'revealed' instead of
+-- 'lobby' and parameterized on the target position (current + 1) instead of
+-- hardcoding 1.
+-- name: OpenNextQuestion :one
+UPDATE games g
+SET state = 'question_open',
+    current_question_position = sqlc.arg(position),
+    answer_cutoff_at = now() + (q.time_limit_seconds || ' seconds')::interval,
+    updated_at = now()
+FROM questions q
+WHERE g.id = sqlc.arg(id) AND g.organizer_id = sqlc.arg(organizer_id) AND g.state = 'revealed'
+  AND q.game_id = g.id AND q.position = sqlc.arg(position)
+RETURNING g.*;
+
+-- Serves two callers: NextQuestion (when no question exists at
+-- position + 1) and StopGame — one guarded write shared by both instead of
+-- two near-identical queries. Resets current_question_position back to 0:
+-- the migration's own invariant is that 0 means "no question open", mirroring
+-- draft/lobby/finished — leaving a stale position here would make buildSnapshot
+-- keep reporting a currentQuestion for a game that already ended.
+-- name: FinishGame :one
+UPDATE games
+SET state = 'finished',
+    current_question_position = 0,
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state IN ('question_open','question_closed','revealed')
+RETURNING *;

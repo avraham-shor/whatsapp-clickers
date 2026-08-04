@@ -10,6 +10,8 @@ type Snapshot struct {
 	PlatformNumber   string               `json:"platformNumber"`
 	ParticipantCount int                  `json:"participantCount"`
 	Participants     []ParticipantSummary `json:"participants"`
+	QuestionCount    int                  `json:"questionCount"`
+	CurrentQuestion  *CurrentQuestion     `json:"currentQuestion"`
 }
 
 // ParticipantSummary is the participant shape a lobby/live client renders;
@@ -17,4 +19,20 @@ type Snapshot struct {
 type ParticipantSummary struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
+}
+
+// CurrentQuestion is the question a live control panel (or, from Epic 4, an
+// Audience Display) renders while a round is in progress. It deliberately
+// omits CorrectOption/AcceptedAnswers — always, at every state, including
+// revealed — since Snapshot is the one payload both role=host and
+// role=display receive over the same WS envelope; leaking the correct
+// answer here would hand it out with no separate reveal gate to add later.
+type CurrentQuestion struct {
+	ID               string   `json:"id"`
+	Position         int      `json:"position"`
+	Type             string   `json:"type"`
+	Text             string   `json:"text"`
+	Options          []string `json:"options,omitempty"`
+	TimeLimitSeconds int      `json:"timeLimitSeconds"`
+	AnswerCutoffAt   string   `json:"answerCutoffAt"` // RFC 3339 UTC
 }

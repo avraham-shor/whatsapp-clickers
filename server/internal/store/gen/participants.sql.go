@@ -11,27 +11,39 @@ import (
 
 const createParticipant = `-- name: CreateParticipant :one
 INSERT INTO participants (game_id, phone, display_name, role)
-VALUES ($1, $2, $3, $4)
+SELECT g.id, $1, $2, $3
+FROM games g
+WHERE g.id = $4 AND g.state = ANY($5::text[])
 ON CONFLICT (game_id, phone) DO NOTHING
 RETURNING id, game_id, phone, display_name, role, joined_at
 `
 
 type CreateParticipantParams struct {
-	GameID      string
-	Phone       string
-	DisplayName string
-	Role        string
+	Phone         string
+	DisplayName   string
+	Role          string
+	GameID        string
+	AllowedStates []string
 }
 
 // ON CONFLICT ... DO NOTHING with :one surfaces a conflict as
 // pgx.ErrNoRows (0 rows returned) — the same error shape every other store
 // method already checks for, no new pgconn error-code handling needed.
+// The FROM games clause re-reads game state at INSERT time rather than
+// trusting the engine's earlier read (closes the check-then-write race
+// between Join's GetGameByJoinCode and this INSERT — deferred from 2.4/2.5,
+// closed by story 3.1's code review): a state transition landing in that
+// window now makes the insert match zero source rows, which the store
+// wrapper folds into the same "no row" path as a genuine conflict.
+// allowed_states lets one query serve both callers — joinLobby passes
+// {'lobby'}, joinSpectator passes the live states.
 func (q *Queries) CreateParticipant(ctx context.Context, arg CreateParticipantParams) (Participant, error) {
 	row := q.db.QueryRow(ctx, createParticipant,
-		arg.GameID,
 		arg.Phone,
 		arg.DisplayName,
 		arg.Role,
+		arg.GameID,
+		arg.AllowedStates,
 	)
 	var i Participant
 	err := row.Scan(

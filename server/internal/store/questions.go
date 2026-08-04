@@ -85,17 +85,30 @@ func (s *Store) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) (g
 	return question, err
 }
 
-// DeleteQuestion removes one question; deleting a missing or foreign
-// question is ErrNotFound.
+// DeleteQuestion removes one question and closes the position gap it
+// leaves, atomically — positions stay a dense 1..N sequence so
+// StartGame/NextQuestion's exact-position-match guards (story 3.1) never
+// see a hole. Deleting a missing, foreign, or non-draft question is
+// ErrNotFound.
 func (s *Store) DeleteQuestion(ctx context.Context, questionID, gameID, organizerID string) error {
-	rows, err := s.q.DeleteQuestion(ctx, gen.DeleteQuestionParams{ID: questionID, GameID: gameID, OrganizerID: organizerID})
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("begin delete question: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+
+	deletedPosition, err := q.DeleteQuestion(ctx, gen.DeleteQuestionParams{ID: questionID, GameID: gameID, OrganizerID: organizerID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
-	if rows == 0 {
-		return ErrNotFound
+	if err := q.CloseQuestionPositionGap(ctx, gen.CloseQuestionPositionGapParams{GameID: gameID, Position: deletedPosition}); err != nil {
+		return err
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ReorderQuestions rewrites positions 1..N to match orderedIDs, atomically.
@@ -109,11 +122,20 @@ func (s *Store) ReorderQuestions(ctx context.Context, gameID, organizerID string
 	defer tx.Rollback(ctx)
 	q := s.q.WithTx(tx)
 
-	if _, err := q.GetGameForOrganizer(ctx, gen.GetGameForOrganizerParams{ID: gameID, OrganizerID: organizerID}); err != nil {
+	g, err := q.GetGameForOrganizer(ctx, gen.GetGameForOrganizerParams{ID: gameID, OrganizerID: organizerID})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
+	}
+	// Closes the check-then-write race between httpapi's requireDraftGame
+	// read and this transaction's writes (deferred from 1.4/1.5, closed by
+	// story 3.1's code review) for the common case; UpdateQuestionPosition's
+	// own per-row draft guard (evaluated fresh at write time) still catches
+	// a state change landing after this read but before the loop below.
+	if g.State != "draft" {
+		return ErrNotFound
 	}
 
 	current, err := q.ListQuestionsByGame(ctx, gen.ListQuestionsByGameParams{GameID: gameID, OrganizerID: organizerID})

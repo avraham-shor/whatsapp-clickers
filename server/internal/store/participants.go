@@ -18,14 +18,22 @@ func (s *Store) ListParticipants(ctx context.Context, gameID string) ([]gen.Part
 // game_id+phone conflict to the existing row rather than erroring: the
 // atomic INSERT ... ON CONFLICT DO NOTHING closes the check-then-write race
 // window for free and reuses the exact pgx.ErrNoRows-means-"no row" idiom
-// every other store method already uses. created reports whether this call
-// won the insert (false on the idempotent-repeat / conflict path).
-func (s *Store) CreateParticipant(ctx context.Context, gameID, phone, displayName, role string) (gen.Participant, bool, error) {
+// every other store method already uses. allowedStates guards the insert
+// against the game having left the caller's expected phase between its
+// state read and this write (deferred from 2.4/2.5, closed by story 3.1's
+// code review) — a guard miss surfaces as the same zero-row path as a
+// genuine conflict, so a first-time join into the "wrong" window comes back
+// ErrNotFound (the engine's Join degrades that to a generic failure reply,
+// same as any other unexpected error) rather than silently registering.
+// created reports whether this call won the insert (false on the
+// idempotent-repeat / conflict path).
+func (s *Store) CreateParticipant(ctx context.Context, gameID, phone, displayName, role string, allowedStates []string) (gen.Participant, bool, error) {
 	p, err := s.q.CreateParticipant(ctx, gen.CreateParticipantParams{
-		GameID:      gameID,
-		Phone:       phone,
-		DisplayName: displayName,
-		Role:        role,
+		GameID:        gameID,
+		Phone:         phone,
+		DisplayName:   displayName,
+		Role:          role,
+		AllowedStates: allowedStates,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, err := s.GetParticipantByPhone(ctx, gameID, phone)

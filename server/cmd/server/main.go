@@ -111,7 +111,9 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// st satisfies game.Store (GetGameForOrganizer, OpenGameLobby, ListParticipants,
-	// GetGameByJoinCode, CreateParticipant, UpdateParticipantNameByPhone).
+	// GetGameByJoinCode, CreateParticipant, UpdateParticipantNameByPhone,
+	// ListQuestionsByGame, StartGameFirstQuestion, CloseCurrentQuestion,
+	// RevealCurrentQuestion, OpenNextQuestion, FinishGame).
 	engine := game.NewEngine(st, cfg.WhatsAppDisplayNumber, logger)
 	hub := ws.NewHub(logger)
 	wsHandler := ws.NewHandler(authSvc, engine, hub, logger)

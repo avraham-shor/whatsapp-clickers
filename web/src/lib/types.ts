@@ -54,6 +54,20 @@ export interface GameList {
   items: GameListItem[]
 }
 
+/** Mirrors the Go game.CurrentQuestion. Deliberately omits the correct
+ * answer (correctOption/acceptedAnswers) — Snapshot is the one payload both
+ * role=host and role=display receive over the same WS envelope. */
+export interface CurrentQuestion {
+  id: string
+  position: number
+  type: QuestionType
+  text: string
+  options?: string[]
+  timeLimitSeconds: number
+  /** RFC 3339 UTC. */
+  answerCutoffAt: string
+}
+
 /** Mirrors the Go game.Snapshot — the REST open-lobby response body and the
  * WS envelope's "state" field share this one shape. */
 export interface LobbySnapshot {
@@ -63,6 +77,8 @@ export interface LobbySnapshot {
   platformNumber: string
   participantCount: number
   participants: { id: string; displayName: string }[]
+  questionCount: number
+  currentQuestion: CurrentQuestion | null
 }
 
 /** The one WS wire message shape: server->client only, full snapshots. */

@@ -48,6 +48,18 @@ func writeStoreError(w http.ResponseWriter, err error, notFoundCode string) {
 		writeValidationError(w, "questionIds must be an exact permutation of the game's question ids")
 	case errors.Is(err, game.ErrNotDraft):
 		writeError(w, http.StatusConflict, "GAME_NOT_EDITABLE", "game must be in draft state to open its lobby")
+	case errors.Is(err, game.ErrNotLobby):
+		writeError(w, http.StatusConflict, "GAME_NOT_LOBBY", "game must be in lobby state to start")
+	case errors.Is(err, game.ErrNoQuestions):
+		writeError(w, http.StatusConflict, "GAME_NO_QUESTIONS", "game must have at least one question to start")
+	case errors.Is(err, game.ErrNotQuestionOpen):
+		writeError(w, http.StatusConflict, "GAME_NOT_QUESTION_OPEN", "game must have an open question to close")
+	case errors.Is(err, game.ErrNotQuestionClosed):
+		writeError(w, http.StatusConflict, "GAME_NOT_QUESTION_CLOSED", "question must be closed before it can be revealed")
+	case errors.Is(err, game.ErrNotRevealed):
+		writeError(w, http.StatusConflict, "GAME_NOT_REVEALED", "question must be revealed before advancing")
+	case errors.Is(err, game.ErrNotStoppable):
+		writeError(w, http.StatusConflict, "GAME_NOT_STOPPABLE", "game cannot be stopped from its current state")
 	default:
 		// Infrastructure: the wire code alone must not be the only triage
 		// signal — record the underlying cause.

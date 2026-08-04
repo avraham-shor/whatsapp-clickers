@@ -9,17 +9,19 @@ import (
 )
 
 type Game struct {
-	ID               string
-	OrganizerID      string
-	Title            string
-	JoinCode         string
-	State            string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	PointsPerCorrect int32
-	SpeedBonusFirst  int32
-	SpeedBonusSecond int32
-	SpeedBonusThird  int32
+	ID                      string
+	OrganizerID             string
+	Title                   string
+	JoinCode                string
+	State                   string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	PointsPerCorrect        int32
+	SpeedBonusFirst         int32
+	SpeedBonusSecond        int32
+	SpeedBonusThird         int32
+	CurrentQuestionPosition int32
+	AnswerCutoffAt          time.Time
 }
 
 type Organizer struct {

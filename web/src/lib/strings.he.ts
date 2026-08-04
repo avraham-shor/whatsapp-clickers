@@ -138,4 +138,25 @@ export const strings = {
     participantCountLabel: (count: number) =>
       count === 1 ? 'משתתף אחד בלובי' : `${count} משתתפים בלובי`,
   },
+  live: {
+    startGameCta: 'התחל משחק',
+    closeQuestionCta: 'סגור שאלה',
+    revealCta: 'גלה תשובה',
+    nextQuestionCta: 'שאלה הבאה ←',
+    stopCta: 'עצור',
+    // [ASSUMPTION]: EXPERIENCE.md specifies the confirm-stop dialog exists
+    // but not its copy — flagged for Avraham to confirm/replace.
+    stopConfirmTitle: 'לעצור את המשחק?',
+    stopConfirmBody:
+      'המשחק יסתיים ולא ניתן יהיה להמשיך אותו. משתתפים לא יקבלו הודעה על העצירה.',
+    stopConfirmAction: 'עצור את המשחק',
+    questionProgress: (n: number, total: number) => `שאלה ${n} מתוך ${total}`,
+    gameOverTitle: 'המשחק הסתיים',
+    actionError: 'הפעולה נכשלה. נסו שוב בעוד רגע.',
+    // No refresh instruction (UX-DR: no refresh dependency on live web
+    // surfaces) — the WS broadcast already carries the current state; this
+    // banner self-clears once it arrives.
+    actionConflict: 'מצב המשחק השתנה בינתיים. הלוח יתעדכן אוטומטית.',
+    startGameNoQuestions: 'הוסיפו לפחות שאלה אחת כדי להתחיל את המשחק.',
+  },
 } as const

@@ -102,7 +102,12 @@ func resolveDisplayName(profileName, phone string) string {
 
 func (e *Engine) joinLobby(ctx context.Context, g gen.Game, phone, profileName string) (JoinResult, error) {
 	displayName := resolveDisplayName(profileName, phone)
-	p, created, err := e.store.CreateParticipant(ctx, g.ID, phone, displayName, RolePlayer)
+	// Guarded to state=lobby: closes the check-then-write race between the
+	// caller's earlier GetGameByJoinCode read and this insert (deferred from
+	// 2.4, closed by story 3.1's code review) — a lobby->question_open
+	// transition landing in that window is observed here instead of
+	// silently registering a player into an already-started game.
+	p, created, err := e.store.CreateParticipant(ctx, g.ID, phone, displayName, RolePlayer, []string{StateLobby})
 	if err != nil {
 		return JoinResult{}, err
 	}
@@ -131,9 +136,18 @@ func (e *Engine) joinLobby(ctx context.Context, g gen.Game, phone, profileName s
 // builds or broadcasts a Snapshot — nothing consumes role in Snapshot today,
 // and the only live-state consumer (the lobby page) is meaningless once a
 // game has left lobby. See story 2.5 Dev Notes.
+// spectatorAllowedStates are the states Join's own switch already routes to
+// joinSpectator (StateDraft/StateFinished never reach here — see Join).
+// Guarding the insert against exactly this set closes the check-then-write
+// race between the caller's earlier GetGameByJoinCode read and this insert
+// (deferred from 2.5, closed by story 3.1's code review) — most notably a
+// live->finished transition landing in that window, which the AC this
+// deferral cites forbids registering a spectator through.
+var spectatorAllowedStates = []string{StateQuestionOpen, StateQuestionClosed, StateRevealed, StateLeaderboard}
+
 func (e *Engine) joinSpectator(ctx context.Context, g gen.Game, phone, profileName string) (JoinResult, error) {
 	displayName := resolveDisplayName(profileName, phone)
-	p, created, err := e.store.CreateParticipant(ctx, g.ID, phone, displayName, RoleSpectator)
+	p, created, err := e.store.CreateParticipant(ctx, g.ID, phone, displayName, RoleSpectator, spectatorAllowedStates)
 	if err != nil {
 		return JoinResult{}, err
 	}

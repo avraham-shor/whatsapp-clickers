@@ -10,10 +10,48 @@ import (
 	"time"
 )
 
+const closeCurrentQuestion = `-- name: CloseCurrentQuestion :one
+UPDATE games
+SET state = 'question_closed',
+    answer_cutoff_at = LEAST(answer_cutoff_at, now()),
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state = 'question_open'
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+`
+
+type CloseCurrentQuestionParams struct {
+	ID          string
+	OrganizerID string
+}
+
+// An early explicit close tightens the cutoff to now(); a close arriving
+// after the timer already elapsed must not push the cutoff later, hence
+// LEAST rather than a plain overwrite.
+func (q *Queries) CloseCurrentQuestion(ctx context.Context, arg CloseCurrentQuestionParams) (Game, error) {
+	row := q.db.QueryRow(ctx, closeCurrentQuestion, arg.ID, arg.OrganizerID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
+	)
+	return i, err
+}
+
 const createGame = `-- name: CreateGame :one
 INSERT INTO games (organizer_id, title, join_code)
 VALUES ($1, $2, $3)
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
 `
 
 type CreateGameParams struct {
@@ -37,12 +75,55 @@ func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, e
 		&i.SpeedBonusFirst,
 		&i.SpeedBonusSecond,
 		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
+	)
+	return i, err
+}
+
+const finishGame = `-- name: FinishGame :one
+UPDATE games
+SET state = 'finished',
+    current_question_position = 0,
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state IN ('question_open','question_closed','revealed')
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+`
+
+type FinishGameParams struct {
+	ID          string
+	OrganizerID string
+}
+
+// Serves two callers: NextQuestion (when no question exists at
+// position + 1) and StopGame — one guarded write shared by both instead of
+// two near-identical queries. Resets current_question_position back to 0:
+// the migration's own invariant is that 0 means "no question open", mirroring
+// draft/lobby/finished — leaving a stale position here would make buildSnapshot
+// keep reporting a currentQuestion for a game that already ended.
+func (q *Queries) FinishGame(ctx context.Context, arg FinishGameParams) (Game, error) {
+	row := q.db.QueryRow(ctx, finishGame, arg.ID, arg.OrganizerID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
 	)
 	return i, err
 }
 
 const getGameByJoinCode = `-- name: GetGameByJoinCode :one
-SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third FROM games WHERE join_code = $1
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at FROM games WHERE join_code = $1
 `
 
 // Unscoped by organizer_id on purpose: a Participant's JOIN message carries
@@ -66,12 +147,14 @@ func (q *Queries) GetGameByJoinCode(ctx context.Context, joinCode string) (Game,
 		&i.SpeedBonusFirst,
 		&i.SpeedBonusSecond,
 		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
 	)
 	return i, err
 }
 
 const getGameForOrganizer = `-- name: GetGameForOrganizer :one
-SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third FROM games
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at FROM games
 WHERE id = $1 AND organizer_id = $2
 `
 
@@ -97,12 +180,14 @@ func (q *Queries) GetGameForOrganizer(ctx context.Context, arg GetGameForOrganiz
 		&i.SpeedBonusFirst,
 		&i.SpeedBonusSecond,
 		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
 	)
 	return i, err
 }
 
 const listGamesByOrganizer = `-- name: ListGamesByOrganizer :many
-SELECT g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, count(q.id) AS question_count
+SELECT g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at, count(q.id) AS question_count
 FROM games g
 LEFT JOIN questions q ON q.game_id = g.id
 WHERE g.organizer_id = $1
@@ -111,18 +196,20 @@ ORDER BY g.created_at DESC
 `
 
 type ListGamesByOrganizerRow struct {
-	ID               string
-	OrganizerID      string
-	Title            string
-	JoinCode         string
-	State            string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	PointsPerCorrect int32
-	SpeedBonusFirst  int32
-	SpeedBonusSecond int32
-	SpeedBonusThird  int32
-	QuestionCount    int64
+	ID                      string
+	OrganizerID             string
+	Title                   string
+	JoinCode                string
+	State                   string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	PointsPerCorrect        int32
+	SpeedBonusFirst         int32
+	SpeedBonusSecond        int32
+	SpeedBonusThird         int32
+	CurrentQuestionPosition int32
+	AnswerCutoffAt          time.Time
+	QuestionCount           int64
 }
 
 func (q *Queries) ListGamesByOrganizer(ctx context.Context, organizerID string) ([]ListGamesByOrganizerRow, error) {
@@ -146,6 +233,8 @@ func (q *Queries) ListGamesByOrganizer(ctx context.Context, organizerID string) 
 			&i.SpeedBonusFirst,
 			&i.SpeedBonusSecond,
 			&i.SpeedBonusThird,
+			&i.CurrentQuestionPosition,
+			&i.AnswerCutoffAt,
 			&i.QuestionCount,
 		); err != nil {
 			return nil, err
@@ -163,7 +252,7 @@ UPDATE games
 SET state = 'lobby',
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2 AND state = 'draft'
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
 `
 
 type OpenGameLobbyParams struct {
@@ -188,6 +277,130 @@ func (q *Queries) OpenGameLobby(ctx context.Context, arg OpenGameLobbyParams) (G
 		&i.SpeedBonusFirst,
 		&i.SpeedBonusSecond,
 		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
+	)
+	return i, err
+}
+
+const openNextQuestion = `-- name: OpenNextQuestion :one
+UPDATE games g
+SET state = 'question_open',
+    current_question_position = $1,
+    answer_cutoff_at = now() + (q.time_limit_seconds || ' seconds')::interval,
+    updated_at = now()
+FROM questions q
+WHERE g.id = $2 AND g.organizer_id = $3 AND g.state = 'revealed'
+  AND q.game_id = g.id AND q.position = $1
+RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at
+`
+
+type OpenNextQuestionParams struct {
+	Position    int32
+	ID          string
+	OrganizerID string
+}
+
+// Same shape as StartGameFirstQuestion, guarded from 'revealed' instead of
+// 'lobby' and parameterized on the target position (current + 1) instead of
+// hardcoding 1.
+func (q *Queries) OpenNextQuestion(ctx context.Context, arg OpenNextQuestionParams) (Game, error) {
+	row := q.db.QueryRow(ctx, openNextQuestion, arg.Position, arg.ID, arg.OrganizerID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
+	)
+	return i, err
+}
+
+const revealCurrentQuestion = `-- name: RevealCurrentQuestion :one
+UPDATE games
+SET state = 'revealed',
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state = 'question_closed'
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+`
+
+type RevealCurrentQuestionParams struct {
+	ID          string
+	OrganizerID string
+}
+
+// No grading-completion gate here: the answers/grading tables don't exist
+// until Stories 3.3-3.6; Story 3.4 is where "activates only once every
+// received answer is graded" gets added.
+func (q *Queries) RevealCurrentQuestion(ctx context.Context, arg RevealCurrentQuestionParams) (Game, error) {
+	row := q.db.QueryRow(ctx, revealCurrentQuestion, arg.ID, arg.OrganizerID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
+	)
+	return i, err
+}
+
+const startGameFirstQuestion = `-- name: StartGameFirstQuestion :one
+UPDATE games g
+SET state = 'question_open',
+    current_question_position = 1,
+    answer_cutoff_at = now() + (q.time_limit_seconds || ' seconds')::interval,
+    updated_at = now()
+FROM questions q
+WHERE g.id = $1 AND g.organizer_id = $2 AND g.state = 'lobby'
+  AND q.game_id = g.id AND q.position = 1
+RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at
+`
+
+type StartGameFirstQuestionParams struct {
+	ID          string
+	OrganizerID string
+}
+
+// Starts the game: opens the question at position 1 and computes its
+// cutoff from that question's time limit. Zero rows covers both "not in
+// lobby" and "no questions" (no matching position-1 row) in one statement —
+// the engine disambiguates which one happened via a prior read, exactly
+// like OpenGameLobby disambiguates a lost race from a missing game.
+func (q *Queries) StartGameFirstQuestion(ctx context.Context, arg StartGameFirstQuestionParams) (Game, error) {
+	row := q.db.QueryRow(ctx, startGameFirstQuestion, arg.ID, arg.OrganizerID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
 	)
 	return i, err
 }
@@ -200,7 +413,7 @@ SET points_per_correct = $3,
     speed_bonus_third = $6,
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
 `
 
 type UpdateGameScoringParams struct {
@@ -234,6 +447,8 @@ func (q *Queries) UpdateGameScoring(ctx context.Context, arg UpdateGameScoringPa
 		&i.SpeedBonusFirst,
 		&i.SpeedBonusSecond,
 		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
 	)
 	return i, err
 }

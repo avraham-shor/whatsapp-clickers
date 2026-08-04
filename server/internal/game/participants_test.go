@@ -52,6 +52,28 @@ func TestJoinFromLobbyFirstJoinReturnsWelcomeWithSnapshot(t *testing.T) {
 	if st.createParticipantRole != RolePlayer {
 		t.Errorf("CreateParticipant role = %q, want RolePlayer", st.createParticipantRole)
 	}
+	if len(st.createParticipantAllowedStates) != 1 || st.createParticipantAllowedStates[0] != StateLobby {
+		t.Errorf("CreateParticipant allowedStates = %v, want [lobby]", st.createParticipantAllowedStates)
+	}
+}
+
+// TestJoinLobbyRaceLossDegradesToGenericFailure covers the check-then-write
+// race this guard closes (deferred from 2.4, closed by story 3.1's code
+// review): a lobby->question_open transition landing between Join's state
+// read and CreateParticipant's write makes the guarded insert match zero
+// rows. With no pre-existing participant row, that surfaces as
+// store.ErrNotFound — Join propagates it unchanged, and wa/inbound.go's
+// default branch already degrades any unrecognized Join error to the
+// generic Help reply, so no new outcome/error type is needed here.
+func TestJoinLobbyRaceLossDegradesToGenericFailure(t *testing.T) {
+	st := joinStub(StateLobby)
+	st.createParticipantErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Join(context.Background(), "AB2CD3", testPhone, "דנה")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Join() err = %v, want store.ErrNotFound (race loss)", err)
+	}
 }
 
 func TestJoinFromLobbyEmptyProfileNameFallsBackToPhoneDigits(t *testing.T) {
@@ -158,7 +180,27 @@ func TestJoinDuringLiveStatesRegistersSpectator(t *testing.T) {
 			if st.createParticipantRole != RoleSpectator {
 				t.Errorf("CreateParticipant role = %q, want RoleSpectator", st.createParticipantRole)
 			}
+			if len(st.createParticipantAllowedStates) != len(spectatorAllowedStates) {
+				t.Errorf("CreateParticipant allowedStates = %v, want %v", st.createParticipantAllowedStates, spectatorAllowedStates)
+			}
 		})
+	}
+}
+
+// TestJoinSpectatorRaceLossDegradesToGenericFailure covers the check-then-
+// write race this guard closes (deferred from 2.5, closed by story 3.1's
+// code review): a live->finished transition landing between Join's state
+// read and CreateParticipant's write makes the guarded insert match zero
+// rows, which — with no pre-existing row — surfaces as store.ErrNotFound
+// rather than silently registering a spectator into a finished game.
+func TestJoinSpectatorRaceLossDegradesToGenericFailure(t *testing.T) {
+	st := joinStub(StateRevealed)
+	st.createParticipantErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Join(context.Background(), "AB2CD3", testPhone, "דנה")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Join() err = %v, want store.ErrNotFound (race loss)", err)
 	}
 }
 
