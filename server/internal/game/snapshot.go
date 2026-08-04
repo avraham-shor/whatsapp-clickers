@@ -35,4 +35,5 @@ type CurrentQuestion struct {
 	Options          []string `json:"options,omitempty"`
 	TimeLimitSeconds int      `json:"timeLimitSeconds"`
 	AnswerCutoffAt   string   `json:"answerCutoffAt"` // RFC 3339 UTC
+	AnsweredCount    int      `json:"answeredCount"`
 }

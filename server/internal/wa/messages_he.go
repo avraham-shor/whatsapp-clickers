@@ -21,11 +21,11 @@ package wa
 //	Spectator notice         -> story 2.5 (below)
 //	Question - MCQ           -> story 3.2 (below)
 //	Question - Free-Text     -> story 3.2 (below)
-//	Acknowledgment           -> story 3.3
-//	Already answered         -> story 3.3
-//	Format hint (MCQ)        -> story 3.3
-//	Too long (Free-Text)     -> story 3.3
-//	Question closed          -> story 3.3
+//	Acknowledgment           -> story 3.3 (below)
+//	Already answered         -> story 3.3 (below)
+//	Format hint (MCQ)        -> story 3.3 (below)
+//	Too long (Free-Text)     -> story 3.3 (below)
+//	Question closed          -> story 3.3 (below)
 //	Result - correct         -> story 3.8
 //	Result - correct + bonus -> story 3.8
 //	Result - wrong           -> story 3.8
@@ -174,4 +174,46 @@ const msgQuestionFreeTextTemplate = "שאלה %s מתוך %s:\n%s\nכתבו את
 func questionFreeTextMessage(number, total int, text string, timeLimitSeconds int) string {
 	return fmt.Sprintf(msgQuestionFreeTextTemplate,
 		ltr(strconv.Itoa(number)), ltr(strconv.Itoa(total)), text, ltr(strconv.Itoa(timeLimitSeconds)))
+}
+
+// msgAcknowledgment is the Acknowledgment row — the PRD-mandated "התקבל ✓"
+// (SM-4/FR-5), sent immediately after the answer row is committed. No
+// placeholders; the grade is never revealed here (FR-6).
+const msgAcknowledgment = "התקבל ✓ — בהצלחה!"
+
+func ackMessage() string {
+	return msgAcknowledgment
+}
+
+// msgAlreadyAnswered is the Already-answered row (FR-8: first answer wins).
+const msgAlreadyAnswered = "כבר ענית ✓ התשובה הראשונה היא שקובעת."
+
+func alreadyAnsweredMessage() string {
+	return msgAlreadyAnswered
+}
+
+// msgFormatHintMCQTemplate is the Format-hint (MCQ) row. Its "1–4" digit
+// range is an LTR run embedded in RTL text exactly like the identical
+// range in msgQuestionMCQTemplate — isolated the same way, per this
+// file's header rule.
+const msgFormatHintMCQTemplate = "כדי לענות שלחו אות (א–ד) או ספרה (%s) — עוד יש זמן!"
+
+func formatHintMessage() string {
+	return fmt.Sprintf(msgFormatHintMCQTemplate, ltr("1–4"))
+}
+
+// msgTooLongFreeTextTemplate is the Too-long (Free-Text) row. "200" is a
+// digit run, isolated per this file's header rule (same as every other
+// digit token here).
+const msgTooLongFreeTextTemplate = "התשובה ארוכה מדי — עד %s תווים. שלחו שוב, בקצרה!"
+
+func tooLongMessage() string {
+	return fmt.Sprintf(msgTooLongFreeTextTemplate, ltr("200"))
+}
+
+// msgQuestionClosed is the Question-closed row (FR-7: late answers).
+const msgQuestionClosed = "השאלה נסגרה — מתכוננים לשאלה הבאה!"
+
+func questionClosedMessage() string {
+	return msgQuestionClosed
 }

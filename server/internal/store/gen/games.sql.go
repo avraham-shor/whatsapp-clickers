@@ -122,6 +122,38 @@ func (q *Queries) FinishGame(ctx context.Context, arg FinishGameParams) (Game, e
 	return i, err
 }
 
+const getGameByID = `-- name: GetGameByID :one
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at FROM games WHERE id = $1
+`
+
+// Unscoped by organizer_id for the same reason as GetGameByJoinCode: this
+// serves RecordAnswer's post-write snapshot build (game.RecordAnswer,
+// story 3.3), another participant-facing WhatsApp path with no organizer
+// context. The caller has already validated the game/question/participant
+// via GetOpenQuestionForPlayer and RecordAnswer's own write-time guard
+// before ever reaching this read — same trust posture as PlayerRecipients'
+// unscoped ListParticipants call.
+func (q *Queries) GetGameByID(ctx context.Context, id string) (Game, error) {
+	row := q.db.QueryRow(ctx, getGameByID, id)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
+	)
+	return i, err
+}
+
 const getGameByJoinCode = `-- name: GetGameByJoinCode :one
 SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at FROM games WHERE join_code = $1
 `

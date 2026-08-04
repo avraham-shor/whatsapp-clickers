@@ -131,6 +131,18 @@ func (s *Store) GetGameByJoinCode(ctx context.Context, joinCode string) (gen.Gam
 	return game, err
 }
 
+// GetGameByID looks up a game by its ID, unscoped by organizer — same
+// posture as GetGameByJoinCode, for RecordAnswer's post-write snapshot
+// build (another participant-facing WhatsApp path). A missing game is
+// ErrNotFound.
+func (s *Store) GetGameByID(ctx context.Context, gameID string) (gen.Game, error) {
+	game, err := s.q.GetGameByID(ctx, gameID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
+
 // StartGameFirstQuestion transitions a game from lobby to question_open on
 // its first question; a foreign/missing game, one not in lobby, or one with
 // no questions (including a concurrent racer that already won the

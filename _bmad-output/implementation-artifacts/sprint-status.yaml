@@ -65,8 +65,8 @@ development_status:
   epic-3: in-progress
   3-1-run-the-game-live-control-state-machine: done
   3-2-question-delivery-to-every-phone: done
-  3-3-answer-intake-with-immediate-acknowledgment: backlog
-  3-4-grading-pipeline-mcq-and-exact-match: backlog
+  3-3-answer-intake-with-immediate-acknowledgment: done
+  3-4-grading-pipeline-mcq-and-exact-match: ready-for-dev
   3-5-hebrew-fuzzy-matching: backlog
   3-6-ai-semantic-validation-fail-closed: backlog
   3-7-scoring-with-speed-bonuses: backlog

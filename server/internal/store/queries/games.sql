@@ -45,6 +45,16 @@ RETURNING *;
 -- name: GetGameByJoinCode :one
 SELECT * FROM games WHERE join_code = $1;
 
+-- Unscoped by organizer_id for the same reason as GetGameByJoinCode: this
+-- serves RecordAnswer's post-write snapshot build (game.RecordAnswer,
+-- story 3.3), another participant-facing WhatsApp path with no organizer
+-- context. The caller has already validated the game/question/participant
+-- via GetOpenQuestionForPlayer and RecordAnswer's own write-time guard
+-- before ever reaching this read — same trust posture as PlayerRecipients'
+-- unscoped ListParticipants call.
+-- name: GetGameByID :one
+SELECT * FROM games WHERE id = $1;
+
 -- Starts the game: opens the question at position 1 and computes its
 -- cutoff from that question's time limit. Zero rows covers both "not in
 -- lobby" and "no questions" (no matching position-1 row) in one statement —

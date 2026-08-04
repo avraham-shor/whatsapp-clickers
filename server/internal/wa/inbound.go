@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/avraham-shor/whatsapp-clickers/internal/game"
 )
@@ -24,6 +25,7 @@ type Replier interface {
 type Registrar interface {
 	Join(ctx context.Context, joinCode, phone, profileName string) (game.JoinResult, error)
 	Rename(ctx context.Context, phone, displayName string) (game.RenameResult, error)
+	RecordAnswer(ctx context.Context, phone, rawText string, receivedAt time.Time) (game.AnswerResult, error)
 }
 
 var _ Registrar = (*game.Engine)(nil)
@@ -51,12 +53,17 @@ const (
 )
 
 // allInboundKinds is the registry every kind must join. Stories that add a
-// kind (JOIN and the name command in 2.4, answers in 3.3) add it here, to
-// replyFor's switch, and to their own reply-routing tests. The registry test
-// proves only that every registered kind yields non-empty copy — it cannot
-// tell a dedicated switch arm from the default (both return real copy), so
-// correct per-kind routing is the adding story's tests' burden, not this
-// registry's.
+// kind whose syntax alone identifies it (JOIN and the name command, both in
+// 2.4) add it here, to replyFor's switch, and to their own reply-routing
+// tests. The registry test proves only that every registered kind yields
+// non-empty copy — it cannot tell a dedicated switch arm from the default
+// (both return real copy), so correct per-kind routing is the adding
+// story's tests' burden, not this registry's.
+//
+// Answer detection (3.3) deliberately does NOT follow this pattern — see
+// handleTextOrAnswer below. Whether a message is an answer depends on
+// game state classify() cannot see, so it stays inside kindText's existing
+// arm as a pre-check rather than becoming a new inboundKind.
 var allInboundKinds = []inboundKind{kindText, kindEmpty, kindNonText, kindJoin, kindRename}
 
 // parseJoinCode recognizes "JOIN <code>" (case-insensitive keyword) and
@@ -177,10 +184,71 @@ func (r *InboundRouter) Handle(ctx context.Context, msg InboundMessage) {
 	case kindRename:
 		r.handleRename(ctx, msg)
 		return
+	case kindText:
+		r.handleTextOrAnswer(ctx, msg)
+		return
 	}
 	r.replier.Enqueue(msg.From, replyFor(kind))
 	r.logger.Info("universal reply queued",
 		"kind", string(kind),
+		"phone_last4", PhoneLast4(msg.From),
+		"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
+}
+
+// handleTextOrAnswer tries msg as an answer to phone's currently open
+// question before falling back to the generic Help reply. Unlike
+// handleJoin/handleRename, kindText's syntax alone cannot distinguish an
+// answer attempt from ordinary chat — "1", a bare word, or a full
+// sentence are all valid Free-Text answer content, and even a bare MCQ
+// digit is only an answer when the sender genuinely has an open MCQ
+// question right now. Rather than teaching classify() (a pure function
+// with no store access, by design) to recognize answers, this handler
+// always asks the engine first; ErrNoOpenQuestion degrades to exactly
+// today's kindText behavior.
+func (r *InboundRouter) handleTextOrAnswer(ctx context.Context, msg InboundMessage) {
+	result, err := r.registrar.RecordAnswer(ctx, msg.From, msg.TextBody, msg.ReceivedAt)
+	if errors.Is(err, game.ErrNoOpenQuestion) {
+		r.replier.Enqueue(msg.From, replyFor(kindText))
+		r.logger.Info("universal reply queued",
+			"kind", string(kindText),
+			"phone_last4", PhoneLast4(msg.From),
+			"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
+		return
+	}
+	if err != nil {
+		r.replier.Enqueue(msg.From, helpMessage())
+		r.logger.Warn("answer intake failed, degrading to help",
+			"error", err.Error(),
+			"phone_last4", PhoneLast4(msg.From),
+			"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
+		return
+	}
+	var reply string
+	switch result.Outcome {
+	case game.AnswerAccepted:
+		reply = ackMessage()
+		if result.Snapshot.GameID != "" {
+			// Broadcast before responding — mirrors handleJoin's ordering,
+			// so the dashboard's live answered-count (AC-5) never lags the
+			// WhatsApp reply. GameID == "" means the post-answer snapshot
+			// build failed and was already logged; skip broadcasting a
+			// snapshot that doesn't exist (review finding, story 3.3).
+			r.broadcaster.Broadcast(result.Snapshot.GameID, result.Snapshot)
+		}
+	case game.AnswerAlreadyAnswered:
+		reply = alreadyAnsweredMessage()
+	case game.AnswerFormatHint:
+		reply = formatHintMessage()
+	case game.AnswerTooLong:
+		reply = tooLongMessage()
+	case game.AnswerClosed:
+		reply = questionClosedMessage()
+	default:
+		reply = helpMessage()
+	}
+	r.replier.Enqueue(msg.From, reply)
+	r.logger.Info("answer processed",
+		"outcome", string(result.Outcome),
 		"phone_last4", PhoneLast4(msg.From),
 		"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
 }

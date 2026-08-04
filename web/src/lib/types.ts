@@ -66,6 +66,7 @@ export interface CurrentQuestion {
   timeLimitSeconds: number
   /** RFC 3339 UTC. */
   answerCutoffAt: string
+  answeredCount: number
 }
 
 /** Mirrors the Go game.Snapshot — the REST open-lobby response body and the

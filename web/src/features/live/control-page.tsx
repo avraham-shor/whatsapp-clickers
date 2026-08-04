@@ -7,6 +7,7 @@ import { strings } from '@/lib/strings.he'
 import { useSpaceAction } from '@/lib/use-space-action'
 import type { LobbySnapshot } from '@/lib/types'
 import { Button } from '@/components/ui/button'
+import { ResponseStats } from './response-stats'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -133,6 +134,9 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
               : strings.gameEditor.typeFreeText}
           </p>
           <p className="text-lg text-host-text">{snapshot.currentQuestion.text}</p>
+          {snapshot.state === 'question_open' && (
+            <ResponseStats count={snapshot.currentQuestion.answeredCount} />
+          )}
         </div>
       )}
 

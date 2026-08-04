@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/avraham-shor/whatsapp-clickers/internal/game"
 )
@@ -48,6 +49,13 @@ type stubRegistrar struct {
 	renameCalls  int
 	renamePhone  string
 	renameName   string
+
+	recordAnswerResult     game.AnswerResult
+	recordAnswerErr        error
+	recordAnswerCalls      int
+	recordAnswerPhone      string
+	recordAnswerRawText    string
+	recordAnswerReceivedAt time.Time
 }
 
 func (s *stubRegistrar) Join(ctx context.Context, joinCode, phone, profileName string) (game.JoinResult, error) {
@@ -63,6 +71,14 @@ func (s *stubRegistrar) Rename(ctx context.Context, phone, displayName string) (
 	s.renamePhone = phone
 	s.renameName = displayName
 	return s.renameResult, s.renameErr
+}
+
+func (s *stubRegistrar) RecordAnswer(ctx context.Context, phone, rawText string, receivedAt time.Time) (game.AnswerResult, error) {
+	s.recordAnswerCalls++
+	s.recordAnswerPhone = phone
+	s.recordAnswerRawText = rawText
+	s.recordAnswerReceivedAt = receivedAt
+	return s.recordAnswerResult, s.recordAnswerErr
 }
 
 // stubBroadcaster records Broadcast calls.
@@ -121,7 +137,10 @@ func TestInboundUniversalReplyMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			replier := &stubReplier{}
 			logger, buf := newTestLogger()
-			r := NewInboundRouter(replier, &stubRegistrar{}, &stubBroadcaster{}, logger)
+			// recordAnswerErr = ErrNoOpenQuestion: none of these scenarios set
+			// up an open question, so kindText messages must fall through to
+			// exactly today's Universal Reply behavior (see handleTextOrAnswer).
+			r := NewInboundRouter(replier, &stubRegistrar{recordAnswerErr: game.ErrNoOpenQuestion}, &stubBroadcaster{}, logger)
 
 			r.Handle(context.Background(), tc.msg)
 
@@ -403,6 +422,198 @@ func TestHandleRenameUnregisteredSenderSendsHelp(t *testing.T) {
 
 	if len(replier.calls) != 1 || replier.calls[0].body != helpMessage() {
 		t.Fatalf("reply = %+v, want the Help message", replier.calls)
+	}
+}
+
+// --- Answer intake dispatch (story 3.3) ---
+
+func TestHandleAnswerAcceptedSendsAck(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerAccepted}}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "1"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != ackMessage() {
+		t.Fatalf("reply = %+v, want the Acknowledgment message", replier.calls)
+	}
+}
+
+// TestHandleAnswerAcceptedBroadcastsSnapshot covers the review finding: an
+// accepted answer must broadcast the fresh snapshot so the control panel's
+// live answered-count (AC-5) updates without waiting on an unrelated event.
+func TestHandleAnswerAcceptedBroadcastsSnapshot(t *testing.T) {
+	replier := &stubReplier{}
+	snap := game.Snapshot{GameID: "game-1"}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerAccepted, GameID: "game-1", Snapshot: snap}}
+	broadcaster := &stubBroadcaster{}
+	r := NewInboundRouter(replier, registrar, broadcaster, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "1"})
+
+	if len(broadcaster.calls) != 1 || broadcaster.calls[0].gameID != "game-1" || broadcaster.calls[0].snapshot.GameID != "game-1" {
+		t.Fatalf("broadcaster.calls = %+v, want one Broadcast(%q, snapshot)", broadcaster.calls, "game-1")
+	}
+}
+
+// TestHandleAnswerAcceptedSkipsBroadcastWhenSnapshotEmpty covers the
+// degrade path: game.RecordAnswer returns a zero Snapshot when the
+// post-answer build failed (already logged there), and handleTextOrAnswer
+// must not broadcast an empty/wrong snapshot in that case.
+func TestHandleAnswerAcceptedSkipsBroadcastWhenSnapshotEmpty(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerAccepted}}
+	broadcaster := &stubBroadcaster{}
+	r := NewInboundRouter(replier, registrar, broadcaster, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "1"})
+
+	if len(broadcaster.calls) != 0 {
+		t.Errorf("broadcaster.calls = %+v, want none", broadcaster.calls)
+	}
+}
+
+// TestHandleAnswerNonAcceptedOutcomesNeverBroadcast pins that only
+// AnswerAccepted triggers a broadcast — the other four outcomes never
+// change the answered-count, so there is nothing to broadcast.
+func TestHandleAnswerNonAcceptedOutcomesNeverBroadcast(t *testing.T) {
+	outcomes := []game.AnswerOutcome{game.AnswerAlreadyAnswered, game.AnswerFormatHint, game.AnswerTooLong, game.AnswerClosed}
+	for _, outcome := range outcomes {
+		t.Run(string(outcome), func(t *testing.T) {
+			replier := &stubReplier{}
+			registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: outcome}}
+			broadcaster := &stubBroadcaster{}
+			r := NewInboundRouter(replier, registrar, broadcaster, nil)
+
+			r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "1"})
+
+			if len(broadcaster.calls) != 0 {
+				t.Errorf("broadcaster.calls = %+v, want none for outcome %q", broadcaster.calls, outcome)
+			}
+		})
+	}
+}
+
+func TestHandleAnswerAlreadyAnsweredSendsAlreadyAnswered(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerAlreadyAnswered}}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "2"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != alreadyAnsweredMessage() {
+		t.Fatalf("reply = %+v, want the Already-answered message", replier.calls)
+	}
+}
+
+func TestHandleAnswerFormatHintSendsFormatHint(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerFormatHint}}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "5"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != formatHintMessage() {
+		t.Fatalf("reply = %+v, want the Format-hint message", replier.calls)
+	}
+}
+
+func TestHandleAnswerTooLongSendsTooLong(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerTooLong}}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: strings.Repeat("א", 201)})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != tooLongMessage() {
+		t.Fatalf("reply = %+v, want the Too-long message", replier.calls)
+	}
+}
+
+func TestHandleAnswerClosedSendsQuestionClosed(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerClosed}}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "1"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != questionClosedMessage() {
+		t.Fatalf("reply = %+v, want the Question-closed message", replier.calls)
+	}
+}
+
+// TestHandleTextFallsThroughToHelpWhenNoOpenQuestion proves kindText's
+// pre-3.3 behavior is preserved for everyone not mid-question.
+func TestHandleTextFallsThroughToHelpWhenNoOpenQuestion(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerErr: game.ErrNoOpenQuestion}
+	logger, buf := newTestLogger()
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, logger)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "מה זה כאן?"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != helpMessage() {
+		t.Fatalf("reply = %+v, want the Help message", replier.calls)
+	}
+	if !strings.Contains(buf.String(), "universal reply queued") {
+		t.Errorf("missing the routing INFO line: %s", buf.String())
+	}
+}
+
+func TestHandleTextDegradesToHelpOnUnexpectedError(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerErr: errors.New("boom")}
+	logger, buf := newTestLogger()
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, logger)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "1"})
+
+	if len(replier.calls) != 1 || replier.calls[0].body != helpMessage() {
+		t.Fatalf("reply = %+v, want the Help message", replier.calls)
+	}
+	if !strings.Contains(buf.String(), "level=WARN") {
+		t.Errorf("an unexpected registrar error must WARN: %s", buf.String())
+	}
+}
+
+func TestHandleTextPassesReceivedAtToRegistrar(t *testing.T) {
+	replier := &stubReplier{}
+	registrar := &stubRegistrar{recordAnswerResult: game.AnswerResult{Outcome: game.AnswerAccepted}}
+	r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+	receivedAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	r.Handle(context.Background(), InboundMessage{From: joinSender, Type: "text", TextBody: "1", ReceivedAt: receivedAt})
+
+	if !registrar.recordAnswerReceivedAt.Equal(receivedAt) {
+		t.Errorf("ReceivedAt passed to registrar = %v, want %v (must originate from the webhook layer, not time.Now())", registrar.recordAnswerReceivedAt, receivedAt)
+	}
+}
+
+// TestNonTextKindsNeverReachRecordAnswer pins the routing-order decision:
+// JOIN/rename keep priority over answer detection, and media/empty
+// messages are never answer attempts — only kindText reaches RecordAnswer.
+func TestNonTextKindsNeverReachRecordAnswer(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  InboundMessage
+	}{
+		{"join", InboundMessage{From: joinSender, Type: "text", TextBody: "JOIN COHEN24"}},
+		{"rename", InboundMessage{From: joinSender, Type: "text", TextBody: "שם: דוד"}},
+		{"empty", InboundMessage{From: joinSender, Type: "text", TextBody: ""}},
+		{"non-text", InboundMessage{From: joinSender, Type: "image"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			replier := &stubReplier{}
+			registrar := &stubRegistrar{}
+			r := NewInboundRouter(replier, registrar, &stubBroadcaster{}, nil)
+
+			r.Handle(context.Background(), tc.msg)
+
+			if registrar.recordAnswerCalls != 0 {
+				t.Errorf("RecordAnswer called %d times for %s, want 0", registrar.recordAnswerCalls, tc.name)
+			}
+		})
 	}
 }
 

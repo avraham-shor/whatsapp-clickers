@@ -6,7 +6,18 @@ package gen
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type Answer struct {
+	ID            string
+	QuestionID    string
+	ParticipantID string
+	Response      string
+	ReceivedAt    time.Time
+	Seq           pgtype.Int8
+}
 
 type Game struct {
 	ID                      string

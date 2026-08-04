@@ -46,6 +46,7 @@ type Store interface {
 	OpenGameLobby(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	ListParticipants(ctx context.Context, gameID string) ([]gen.Participant, error)
 	GetGameByJoinCode(ctx context.Context, joinCode string) (gen.Game, error)
+	GetGameByID(ctx context.Context, gameID string) (gen.Game, error)
 	CreateParticipant(ctx context.Context, gameID, phone, displayName, role string, allowedStates []string) (gen.Participant, bool, error)
 	UpdateParticipantNameByPhone(ctx context.Context, phone, displayName string) (gen.Participant, error)
 	ListQuestionsByGame(ctx context.Context, gameID, organizerID string) ([]gen.Question, error)
@@ -54,6 +55,9 @@ type Store interface {
 	RevealCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error)
 	FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error)
+	GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error)
+	RecordAnswer(ctx context.Context, arg store.RecordAnswerParams) (gen.Answer, error)
+	CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error)
 }
 
 // Engine is the single write path for games.state (Enforcement Guidelines:
@@ -336,6 +340,11 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 					TimeLimitSeconds: int(q.TimeLimitSeconds),
 					AnswerCutoffAt:   g.AnswerCutoffAt.UTC().Format(time.RFC3339),
 				}
+				count, err := e.store.CountAnswersByQuestion(ctx, current.ID)
+				if err != nil {
+					return Snapshot{}, err
+				}
+				current.AnsweredCount = int(count)
 				break
 			}
 		}

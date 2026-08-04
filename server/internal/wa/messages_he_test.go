@@ -20,6 +20,11 @@ const (
 	canonicalSpectatorNoticeCopy  = "המשחק כבר התחיל! נרשמת כצופה — התוצאות יגיעו לכאן בסוף המשחק 🏆"
 	canonicalQuestionMCQCopy      = "שאלה %s מתוך %s:\n%s\nא. %s\nב. %s\nג. %s\nד. %s\nהשיבו באות (א–ד) או בספרה (%s) — יש לכם %s שניות!"
 	canonicalQuestionFreeTextCopy = "שאלה %s מתוך %s:\n%s\nכתבו את התשובה בהודעה — יש לכם %s שניות!"
+	canonicalAcknowledgmentCopy   = "התקבל ✓ — בהצלחה!"
+	canonicalAlreadyAnsweredCopy  = "כבר ענית ✓ התשובה הראשונה היא שקובעת."
+	canonicalFormatHintCopy       = "כדי לענות שלחו אות (א–ד) או ספרה (%s) — עוד יש זמן!"
+	canonicalTooLongCopy          = "התשובה ארוכה מדי — עד %s תווים. שלחו שוב, בקצרה!"
+	canonicalQuestionClosedCopy   = "השאלה נסגרה — מתכוננים לשאלה הבאה!"
 )
 
 func stripIsolates(s string) string {
@@ -148,5 +153,65 @@ func TestQuestionFreeTextMessageIsolatesDigitTokens(t *testing.T) {
 		if !strings.Contains(got, isolated) {
 			t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", token, got)
 		}
+	}
+}
+
+// --- Acknowledgment ---
+
+func TestAcknowledgmentMessageMatchesCanonicalCopy(t *testing.T) {
+	if got := ackMessage(); got != canonicalAcknowledgmentCopy {
+		t.Errorf("Acknowledgment copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", got, canonicalAcknowledgmentCopy)
+	}
+}
+
+// --- Already answered ---
+
+func TestAlreadyAnsweredMessageMatchesCanonicalCopy(t *testing.T) {
+	if got := alreadyAnsweredMessage(); got != canonicalAlreadyAnsweredCopy {
+		t.Errorf("Already-answered copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", got, canonicalAlreadyAnsweredCopy)
+	}
+}
+
+// --- Format hint (MCQ) ---
+
+func TestFormatHintMessageMatchesCanonicalCopy(t *testing.T) {
+	stripped := stripIsolates(formatHintMessage())
+	want := fmt.Sprintf(canonicalFormatHintCopy, "1–4")
+	if stripped != want {
+		t.Errorf("Format-hint copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestFormatHintMessageIsolatesDigitToken(t *testing.T) {
+	got := formatHintMessage()
+	isolated := lriMark + "1–4" + pdiMark
+	if !strings.Contains(got, isolated) {
+		t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", "1–4", got)
+	}
+}
+
+// --- Too long (Free-Text) ---
+
+func TestTooLongMessageMatchesCanonicalCopy(t *testing.T) {
+	stripped := stripIsolates(tooLongMessage())
+	want := fmt.Sprintf(canonicalTooLongCopy, "200")
+	if stripped != want {
+		t.Errorf("Too-long copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestTooLongMessageIsolatesDigitToken(t *testing.T) {
+	got := tooLongMessage()
+	isolated := lriMark + "200" + pdiMark
+	if !strings.Contains(got, isolated) {
+		t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", "200", got)
+	}
+}
+
+// --- Question closed ---
+
+func TestQuestionClosedMessageMatchesCanonicalCopy(t *testing.T) {
+	if got := questionClosedMessage(); got != canonicalQuestionClosedCopy {
+		t.Errorf("Question-closed copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", got, canonicalQuestionClosedCopy)
 	}
 }

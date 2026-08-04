@@ -151,6 +151,7 @@ export const strings = {
       'המשחק יסתיים ולא ניתן יהיה להמשיך אותו. משתתפים לא יקבלו הודעה על העצירה.',
     stopConfirmAction: 'עצור את המשחק',
     questionProgress: (n: number, total: number) => `שאלה ${n} מתוך ${total}`,
+    answeredStat: (count: number) => `${count} ענו`,
     gameOverTitle: 'המשחק הסתיים',
     actionError: 'הפעולה נכשלה. נסו שוב בעוד רגע.',
     // No refresh instruction (UX-DR: no refresh dependency on live web

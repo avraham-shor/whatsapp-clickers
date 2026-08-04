@@ -36,6 +36,10 @@ type stubStore struct {
 	getGameByJoinCodeErr    error
 	getGameByJoinCodeCalls  int
 
+	getGameByIDResult gen.Game
+	getGameByIDErr    error
+	getGameByIDCalls  int
+
 	createParticipantResult        gen.Participant
 	createParticipantCreated       bool
 	createParticipantErr           error
@@ -73,6 +77,17 @@ type stubStore struct {
 	finishGameResult gen.Game
 	finishGameErr    error
 	finishGameCalls  int
+
+	getOpenQuestionForPlayerResult gen.GetOpenQuestionForPlayerRow
+	getOpenQuestionForPlayerErr    error
+
+	recordAnswerResult gen.Answer
+	recordAnswerErr    error
+	recordAnswerCalls  int
+	recordAnswerArg    store.RecordAnswerParams
+
+	countAnswersByQuestionResult int64
+	countAnswersByQuestionErr    error
 }
 
 func (s *stubStore) GetGameForOrganizer(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
@@ -91,6 +106,11 @@ func (s *stubStore) ListParticipants(ctx context.Context, gameID string) ([]gen.
 func (s *stubStore) GetGameByJoinCode(ctx context.Context, joinCode string) (gen.Game, error) {
 	s.getGameByJoinCodeCalls++
 	return s.getGameByJoinCodeResult, s.getGameByJoinCodeErr
+}
+
+func (s *stubStore) GetGameByID(ctx context.Context, gameID string) (gen.Game, error) {
+	s.getGameByIDCalls++
+	return s.getGameByIDResult, s.getGameByIDErr
 }
 
 func (s *stubStore) CreateParticipant(ctx context.Context, gameID, phone, displayName, role string, allowedStates []string) (gen.Participant, bool, error) {
@@ -151,6 +171,20 @@ func (s *stubStore) OpenNextQuestion(ctx context.Context, gameID, organizerID st
 func (s *stubStore) FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
 	s.finishGameCalls++
 	return s.finishGameResult, s.finishGameErr
+}
+
+func (s *stubStore) GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error) {
+	return s.getOpenQuestionForPlayerResult, s.getOpenQuestionForPlayerErr
+}
+
+func (s *stubStore) RecordAnswer(ctx context.Context, arg store.RecordAnswerParams) (gen.Answer, error) {
+	s.recordAnswerCalls++
+	s.recordAnswerArg = arg
+	return s.recordAnswerResult, s.recordAnswerErr
+}
+
+func (s *stubStore) CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error) {
+	return s.countAnswersByQuestionResult, s.countAnswersByQuestionErr
 }
 
 func draftStub() *stubStore {
@@ -348,6 +382,23 @@ func TestSnapshotReturnsCurrentStateWithParticipantCount(t *testing.T) {
 	}
 }
 
+// TestSnapshotAnsweredCountErrorPropagates covers buildSnapshot's new
+// CountAnswersByQuestion call failing while resolving the current question —
+// propagates the same as the pre-existing ListParticipants/ListQuestionsByGame
+// errors in this function (no special-case degradation here; the
+// snapshotAfterCommit callers already degrade a buildSnapshot failure to an
+// empty snapshot on their own, unrelated to this direct Snapshot() call).
+func TestSnapshotAnsweredCountErrorPropagates(t *testing.T) {
+	st := questionOpenStub()
+	st.countAnswersByQuestionErr = errors.New("boom")
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+	if err == nil {
+		t.Fatal("Snapshot() err = nil, want a propagated error")
+	}
+}
+
 func TestSnapshotMissingOrForeignGameReturnsErrNotFound(t *testing.T) {
 	st := &stubStore{gameErr: store.ErrNotFound}
 	e := NewEngine(st, "+972 50-000-0000", nil)
@@ -362,6 +413,7 @@ func TestSnapshotMissingOrForeignGameReturnsErrNotFound(t *testing.T) {
 
 func TestStartGameFromLobbyReturnsQuestionOpenSnapshot(t *testing.T) {
 	st := lobbyStub()
+	st.countAnswersByQuestionResult = 3
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
 	snap, err := e.StartGame(context.Background(), testGameID, testOrganizerID)
@@ -379,6 +431,9 @@ func TestStartGameFromLobbyReturnsQuestionOpenSnapshot(t *testing.T) {
 	}
 	if snap.CurrentQuestion.AnswerCutoffAt != testCutoff.Format(time.RFC3339) {
 		t.Errorf("AnswerCutoffAt = %q, want %q", snap.CurrentQuestion.AnswerCutoffAt, testCutoff.Format(time.RFC3339))
+	}
+	if snap.CurrentQuestion.AnsweredCount != 3 {
+		t.Errorf("AnsweredCount = %d, want 3", snap.CurrentQuestion.AnsweredCount)
 	}
 	if st.startGameFirstQuestionCalls != 1 {
 		t.Errorf("StartGameFirstQuestion called %d times, want 1", st.startGameFirstQuestionCalls)
@@ -527,6 +582,7 @@ func TestRevealRaceLossReturnsErrNotQuestionClosed(t *testing.T) {
 
 func TestNextQuestionOpensNextQuestionWhenOneExists(t *testing.T) {
 	st := revealedStub()
+	st.countAnswersByQuestionResult = 5
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
 	snap, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
@@ -538,6 +594,9 @@ func TestNextQuestionOpensNextQuestionWhenOneExists(t *testing.T) {
 	}
 	if snap.CurrentQuestion == nil || snap.CurrentQuestion.Position != 2 {
 		t.Fatalf("CurrentQuestion = %+v, want position 2", snap.CurrentQuestion)
+	}
+	if snap.CurrentQuestion.AnsweredCount != 5 {
+		t.Errorf("AnsweredCount = %d, want 5", snap.CurrentQuestion.AnsweredCount)
 	}
 	if st.openNextQuestionCalls != 1 || st.openNextQuestionPosition != 2 {
 		t.Errorf("OpenNextQuestion called %d times with position %d, want 1 call at position 2", st.openNextQuestionCalls, st.openNextQuestionPosition)
