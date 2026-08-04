@@ -13,11 +13,13 @@ import (
 // comparison, so an editor mangling the mixed-direction literal fails the
 // build instead of shipping scrambled Hebrew.
 const (
-	canonicalWelcomeCopy         = "היי %s, נרשמת! 🎉 השאירו את הצ'אט הזה פתוח — השאלות יגיעו לכאן. (לא %s? שלחו לדוגמה — שם: רחל לוי)"
-	canonicalPreLobbyCopy        = "הקוד נכון! ההרשמה עוד לא נפתחה — שלחו שוב את ההודעה כשהמארגן מכריז שמתחילים."
-	canonicalInvalidCodeCopy     = "הקוד %s לא נמצא. בדקו את הקוד עם המארגן ושלחו שוב: %s ואחריו הקוד."
-	canonicalNameUpdatedCopy     = "עודכן ✓ מעכשיו: %s"
-	canonicalSpectatorNoticeCopy = "המשחק כבר התחיל! נרשמת כצופה — התוצאות יגיעו לכאן בסוף המשחק 🏆"
+	canonicalWelcomeCopy          = "היי %s, נרשמת! 🎉 השאירו את הצ'אט הזה פתוח — השאלות יגיעו לכאן. (לא %s? שלחו לדוגמה — שם: רחל לוי)"
+	canonicalPreLobbyCopy         = "הקוד נכון! ההרשמה עוד לא נפתחה — שלחו שוב את ההודעה כשהמארגן מכריז שמתחילים."
+	canonicalInvalidCodeCopy      = "הקוד %s לא נמצא. בדקו את הקוד עם המארגן ושלחו שוב: %s ואחריו הקוד."
+	canonicalNameUpdatedCopy      = "עודכן ✓ מעכשיו: %s"
+	canonicalSpectatorNoticeCopy  = "המשחק כבר התחיל! נרשמת כצופה — התוצאות יגיעו לכאן בסוף המשחק 🏆"
+	canonicalQuestionMCQCopy      = "שאלה %s מתוך %s:\n%s\nא. %s\nב. %s\nג. %s\nד. %s\nהשיבו באות (א–ד) או בספרה (%s) — יש לכם %s שניות!"
+	canonicalQuestionFreeTextCopy = "שאלה %s מתוך %s:\n%s\nכתבו את התשובה בהודעה — יש לכם %s שניות!"
 )
 
 func stripIsolates(s string) string {
@@ -104,5 +106,47 @@ func TestNameUpdatedMessageIsolatesLTRTokens(t *testing.T) {
 func TestSpectatorNoticeMessageMatchesCanonicalCopy(t *testing.T) {
 	if got := spectatorNoticeMessage(); got != canonicalSpectatorNoticeCopy {
 		t.Errorf("Spectator-notice copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", got, canonicalSpectatorNoticeCopy)
+	}
+}
+
+// --- Question - MCQ ---
+
+func TestQuestionMCQMessageMatchesCanonicalCopy(t *testing.T) {
+	options := []string{"אחת", "שתיים", "שלוש", "ארבע"}
+	stripped := stripIsolates(questionMCQMessage(2, 5, "כמה זה 1+1?", options, 20))
+	want := fmt.Sprintf(canonicalQuestionMCQCopy, "2", "5", "כמה זה 1+1?", options[0], options[1], options[2], options[3], "1–4", "20")
+	if stripped != want {
+		t.Errorf("Question-MCQ copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestQuestionMCQMessageIsolatesDigitTokens(t *testing.T) {
+	options := []string{"אחת", "שתיים", "שלוש", "ארבע"}
+	got := questionMCQMessage(2, 5, "כמה זה 1+1?", options, 20)
+	for _, token := range []string{"2", "5", "1–4", "20"} {
+		isolated := lriMark + token + pdiMark
+		if !strings.Contains(got, isolated) {
+			t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", token, got)
+		}
+	}
+}
+
+// --- Question - Free-Text ---
+
+func TestQuestionFreeTextMessageMatchesCanonicalCopy(t *testing.T) {
+	stripped := stripIsolates(questionFreeTextMessage(3, 5, "מה בירת ישראל?", 30))
+	want := fmt.Sprintf(canonicalQuestionFreeTextCopy, "3", "5", "מה בירת ישראל?", "30")
+	if stripped != want {
+		t.Errorf("Question-Free-Text copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestQuestionFreeTextMessageIsolatesDigitTokens(t *testing.T) {
+	got := questionFreeTextMessage(3, 5, "מה בירת ישראל?", 30)
+	for _, token := range []string{"3", "5", "30"} {
+		isolated := lriMark + token + pdiMark
+		if !strings.Contains(got, isolated) {
+			t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", token, got)
+		}
 	}
 }

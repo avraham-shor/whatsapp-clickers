@@ -3,9 +3,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/avraham-shor/whatsapp-clickers/internal/auth"
 	"github.com/avraham-shor/whatsapp-clickers/internal/game"
@@ -39,6 +43,18 @@ type stubControlEngine struct {
 	stopGameSnapshot     game.Snapshot
 	stopGameErr          error
 	stopGameRequestedFor [][2]string
+
+	// playerRecipientsMu guards the fields below. dispatchQuestionOpened
+	// (control.go) now runs in a goroutine spawned after the HTTP response
+	// is written, so PlayerRecipients can run concurrently with a test
+	// goroutine reading these fields. playerRecipientsDone, if non-nil,
+	// receives a signal after every call — tests exercising the dispatch
+	// goroutine wait on it instead of racing or sleeping.
+	playerRecipientsMu           sync.Mutex
+	playerRecipients             []string
+	playerRecipientsErr          error
+	playerRecipientsRequestedFor []string
+	playerRecipientsDone         chan struct{}
 }
 
 func (s *stubControlEngine) OpenLobby(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
@@ -71,6 +87,25 @@ func (s *stubControlEngine) StopGame(ctx context.Context, gameID, organizerID st
 	return s.stopGameSnapshot, s.stopGameErr
 }
 
+func (s *stubControlEngine) PlayerRecipients(ctx context.Context, gameID string) ([]string, error) {
+	s.playerRecipientsMu.Lock()
+	s.playerRecipientsRequestedFor = append(s.playerRecipientsRequestedFor, gameID)
+	recipients, err := s.playerRecipients, s.playerRecipientsErr
+	s.playerRecipientsMu.Unlock()
+	if s.playerRecipientsDone != nil {
+		s.playerRecipientsDone <- struct{}{}
+	}
+	return recipients, err
+}
+
+// PlayerRecipientsRequestedFor returns a thread-safe snapshot of every
+// gameID PlayerRecipients was called with.
+func (s *stubControlEngine) PlayerRecipientsRequestedFor() []string {
+	s.playerRecipientsMu.Lock()
+	defer s.playerRecipientsMu.Unlock()
+	return append([]string(nil), s.playerRecipientsRequestedFor...)
+}
+
 // stubBroadcaster implements SnapshotBroadcaster and records every call.
 type stubBroadcaster struct {
 	calls []broadcastCall
@@ -85,11 +120,66 @@ func (s *stubBroadcaster) Broadcast(gameID string, snapshot game.Snapshot) {
 	s.calls = append(s.calls, broadcastCall{gameID, snapshot})
 }
 
+// stubQuestionDispatcher implements QuestionDispatcher and records every
+// DispatchQuestionOpened call. Dispatch now runs in a goroutine the handler
+// spawns after writing its HTTP response (see dispatchQuestionOpened's doc
+// comment in control.go), so calls is guarded by mu; done, if non-nil,
+// receives a signal after every recorded call so tests can wait
+// deterministically instead of racing the goroutine or sleeping.
+type stubQuestionDispatcher struct {
+	mu    sync.Mutex
+	calls []dispatchCall
+	done  chan struct{}
+}
+
+type dispatchCall struct {
+	gameID        string
+	question      game.CurrentQuestion
+	questionCount int
+	recipients    []string
+}
+
+func (s *stubQuestionDispatcher) DispatchQuestionOpened(gameID string, question game.CurrentQuestion, questionCount int, recipients []string) {
+	s.mu.Lock()
+	s.calls = append(s.calls, dispatchCall{gameID: gameID, question: question, questionCount: questionCount, recipients: recipients})
+	s.mu.Unlock()
+	if s.done != nil {
+		s.done <- struct{}{}
+	}
+}
+
+// Calls returns a thread-safe snapshot of every recorded call.
+func (s *stubQuestionDispatcher) Calls() []dispatchCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]dispatchCall(nil), s.calls...)
+}
+
+// waitForSignal blocks until ch fires or the test times out — used to
+// observe the dispatch goroutine handleStartGame/handleNextQuestion spawn
+// after writing their HTTP response, without sleeping or racing it.
+func waitForSignal(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the dispatch goroutine")
+	}
+}
+
 // controlRouter builds a router with an authenticated org-1 session and the
-// given ControlEngine/SnapshotBroadcaster stubs.
+// given ControlEngine/SnapshotBroadcaster stubs. No QuestionDispatcher —
+// none of this file's existing tests exercise WhatsApp dispatch.
 func controlRouter(engine ControlEngine, hub SnapshotBroadcaster) http.Handler {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil)
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil)
+}
+
+// controlRouterWithDispatcher is controlRouter plus a real QuestionDispatcher
+// — used only by the dispatch tests below.
+func controlRouterWithDispatcher(engine ControlEngine, hub SnapshotBroadcaster, dispatcher QuestionDispatcher) http.Handler {
+	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, dispatcher)
 }
 
 func TestOpenLobbySuccessReturnsSnapshotAndBroadcasts(t *testing.T) {
@@ -160,7 +250,7 @@ func TestOpenLobbyForeignOrMissingGameReturns404(t *testing.T) {
 func TestOpenLobbyWithoutSessionReturns401(t *testing.T) {
 	engine := &stubControlEngine{}
 	hub := &stubBroadcaster{}
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+"/open-lobby", nil))
 
@@ -314,7 +404,7 @@ func TestControlActionWithoutSessionReturns401(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &stubControlEngine{}
 			hub := &stubBroadcaster{}
-			router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil)
+			router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+tc.path, nil))
 
@@ -344,5 +434,140 @@ func TestStartGameNoQuestionsReturns409(t *testing.T) {
 	}
 	if len(hub.calls) != 0 {
 		t.Error("Broadcast called on a rejected transition")
+	}
+}
+
+// --- Question dispatch (story 3.2) ---
+
+func TestStartGameDispatchesQuestionToPlayers(t *testing.T) {
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	wantRecipients := []string{"+972500000001", "+972500000002"}
+	engine := &stubControlEngine{
+		startGameSnapshot: game.Snapshot{GameID: testGameID, State: "question_open", QuestionCount: 3, CurrentQuestion: &question},
+		playerRecipients:  wantRecipients,
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubQuestionDispatcher{done: make(chan struct{}, 1)}
+	rec := httptest.NewRecorder()
+	controlRouterWithDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/start", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /start = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, dispatcher.done)
+
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("DispatchQuestionOpened called %d times, want 1", len(calls))
+	}
+	call := calls[0]
+	if call.gameID != testGameID || call.question.ID != "q1" || call.questionCount != 3 {
+		t.Errorf("dispatch call = %+v, want gameID=%s question=q1 questionCount=3", call, testGameID)
+	}
+	if !slices.Equal(call.recipients, wantRecipients) {
+		t.Errorf("dispatch recipients = %v, want %v", call.recipients, wantRecipients)
+	}
+	if got := engine.PlayerRecipientsRequestedFor(); len(got) != 1 || got[0] != testGameID {
+		t.Errorf("PlayerRecipients requested for %v, want exactly one call for %s", got, testGameID)
+	}
+}
+
+func TestNextQuestionDispatchesQuestionToPlayers(t *testing.T) {
+	question := game.CurrentQuestion{ID: "q2", Position: 2, Type: "free_text", Text: "Capital?", TimeLimitSeconds: 30}
+	wantRecipients := []string{"+972500000001"}
+	engine := &stubControlEngine{
+		nextQuestionSnapshot: game.Snapshot{GameID: testGameID, State: "question_open", QuestionCount: 3, CurrentQuestion: &question},
+		playerRecipients:     wantRecipients,
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubQuestionDispatcher{done: make(chan struct{}, 1)}
+	rec := httptest.NewRecorder()
+	controlRouterWithDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/next-question", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /next-question = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, dispatcher.done)
+
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("DispatchQuestionOpened called %d times, want 1", len(calls))
+	}
+	call := calls[0]
+	if call.gameID != testGameID || call.question.ID != "q2" || call.questionCount != 3 {
+		t.Errorf("dispatch call = %+v, want gameID=%s question=q2 questionCount=3", call, testGameID)
+	}
+	if !slices.Equal(call.recipients, wantRecipients) {
+		t.Errorf("dispatch recipients = %v, want %v", call.recipients, wantRecipients)
+	}
+}
+
+func TestNextQuestionFinishingGameDoesNotDispatch(t *testing.T) {
+	// The finishing branch: NextQuestion succeeds but the game is finished,
+	// not question_open — dispatchQuestionOpened's guard trips on the state
+	// check before it ever touches PlayerRecipients or the dispatcher, so
+	// nothing async is ever spawned to wait for here.
+	engine := &stubControlEngine{
+		nextQuestionSnapshot: game.Snapshot{GameID: testGameID, State: "finished", CurrentQuestion: nil},
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubQuestionDispatcher{}
+	rec := httptest.NewRecorder()
+	controlRouterWithDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/next-question", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /next-question = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchQuestionOpened called %d times, want 0 on the finishing branch", len(calls))
+	}
+	if got := engine.PlayerRecipientsRequestedFor(); len(got) != 0 {
+		t.Errorf("PlayerRecipients called %d times, want 0 on the finishing branch", len(got))
+	}
+}
+
+func TestStartGameDispatchSkippedOnRecipientsError(t *testing.T) {
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	engine := &stubControlEngine{
+		startGameSnapshot:    game.Snapshot{GameID: testGameID, State: "question_open", QuestionCount: 3, CurrentQuestion: &question},
+		playerRecipientsErr:  errors.New("db down"),
+		playerRecipientsDone: make(chan struct{}, 1),
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubQuestionDispatcher{}
+	rec := httptest.NewRecorder()
+	controlRouterWithDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/start", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /start = %d, want 200 even when recipient lookup fails (already-committed transition)", rec.Code)
+	}
+	waitForSignal(t, engine.playerRecipientsDone)
+
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchQuestionOpened called %d times, want 0 when PlayerRecipients errors", len(calls))
+	}
+}
+
+func TestOtherControlActionsNeverDispatch(t *testing.T) {
+	// CloseQuestion/Reveal/StopGame don't accept a dispatcher param at all,
+	// so dispatchQuestionOpened is never reached from these handlers — true
+	// by construction. The snapshot below carries a non-nil CurrentQuestion,
+	// matching what buildSnapshot really produces once
+	// CurrentQuestionPosition > 0 regardless of state, so this test cannot
+	// pass by accident of a nil-CurrentQuestion guard alone — it is
+	// dispatchQuestionOpened's State == question_open check (and the fact
+	// this handler never calls it) that actually protects this path.
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	engine := &stubControlEngine{closeQuestionSnapshot: game.Snapshot{GameID: testGameID, State: "question_closed", CurrentQuestion: &question}}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubQuestionDispatcher{}
+	rec := httptest.NewRecorder()
+	controlRouterWithDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/close-question", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /close-question = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchQuestionOpened called %d times, want 0 for /close-question", len(calls))
 	}
 }

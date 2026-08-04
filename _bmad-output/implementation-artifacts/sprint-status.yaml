@@ -36,6 +36,7 @@
 
 generated: 2026-07-10
 last_updated: 2026-08-04
+
 project: whatsapp-clickers
 project_key: NOKEY
 tracking_system: file-system
@@ -63,7 +64,7 @@ development_status:
   # Epic 3: Live Gameplay — A Complete Game Runs in WhatsApp
   epic-3: in-progress
   3-1-run-the-game-live-control-state-machine: done
-  3-2-question-delivery-to-every-phone: backlog
+  3-2-question-delivery-to-every-phone: done
   3-3-answer-intake-with-immediate-acknowledgment: backlog
   3-4-grading-pipeline-mcq-and-exact-match: backlog
   3-5-hebrew-fuzzy-matching: backlog

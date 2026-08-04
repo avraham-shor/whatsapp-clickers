@@ -260,6 +260,28 @@ func (e *Engine) Snapshot(ctx context.Context, gameID, organizerID string) (Snap
 	return e.buildSnapshot(ctx, g)
 }
 
+// PlayerRecipients returns the phone numbers of every player-role
+// Participant in gameID — the WhatsApp Question-dispatch recipient list
+// (FR-4); Spectators are excluded. Non-nil, possibly-empty slice, same
+// "never null on the wire" discipline as buildSnapshot's participant
+// summaries, even though this return value is never serialized. Unscoped by
+// organizerID: every call site has already validated ownership via the
+// state transition that immediately preceded it — identical trust posture
+// to buildSnapshot's own unscoped ListParticipants call.
+func (e *Engine) PlayerRecipients(ctx context.Context, gameID string) ([]string, error) {
+	participants, err := e.store.ListParticipants(ctx, gameID)
+	if err != nil {
+		return nil, err
+	}
+	phones := make([]string, 0, len(participants))
+	for _, p := range participants {
+		if p.Role == RolePlayer {
+			phones = append(phones, p.Phone)
+		}
+	}
+	return phones, nil
+}
+
 // snapshotAfterCommit builds the post-transition snapshot for g, whose
 // state transition already committed. A failure building it here must not
 // be reported as a failed transition — the caller would retry into a

@@ -122,9 +122,12 @@ func run(logger *slog.Logger) error {
 	inboundRouter := wa.NewInboundRouter(dispatcher, engine, hub, logger)
 	// st satisfies Deduper directly (MarkWaMessageProcessed).
 	webhookHandler := wa.NewWebhookHandler(cfg.WhatsAppAppSecret, cfg.WhatsAppVerifyToken, cfg.WhatsAppPhoneNumberID, st, inboundRouter, logger)
+	// dispatcher already satisfies wa.Replier, exactly like inboundRouter's
+	// construction above reuses it.
+	questionNotifier := wa.NewQuestionNotifier(dispatcher, logger)
 
 	// st satisfies both Pinger and GameStore.
-	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler)
+	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler, questionNotifier)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

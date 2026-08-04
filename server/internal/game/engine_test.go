@@ -656,3 +656,49 @@ func TestStopGameMissingOrForeignGameReturnsErrNotFound(t *testing.T) {
 		t.Fatalf("StopGame() err = %v, want store.ErrNotFound", err)
 	}
 }
+
+// --- PlayerRecipients ---
+
+func TestPlayerRecipientsReturnsOnlyPlayerPhones(t *testing.T) {
+	st := &stubStore{participants: []gen.Participant{
+		{ID: "p1", GameID: testGameID, Phone: "+972500000001", Role: RolePlayer},
+		{ID: "p2", GameID: testGameID, Phone: "+972500000002", Role: RoleSpectator},
+		{ID: "p3", GameID: testGameID, Phone: "+972500000003", Role: RolePlayer},
+	}}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	phones, err := e.PlayerRecipients(context.Background(), testGameID)
+	if err != nil {
+		t.Fatalf("PlayerRecipients() err = %v, want nil", err)
+	}
+	want := []string{"+972500000001", "+972500000003"}
+	if len(phones) != len(want) || phones[0] != want[0] || phones[1] != want[1] {
+		t.Errorf("PlayerRecipients() = %v, want %v", phones, want)
+	}
+}
+
+func TestPlayerRecipientsAllSpectatorsReturnsEmptyNonNilSlice(t *testing.T) {
+	st := &stubStore{participants: []gen.Participant{
+		{ID: "p1", GameID: testGameID, Phone: "+972500000001", Role: RoleSpectator},
+	}}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	phones, err := e.PlayerRecipients(context.Background(), testGameID)
+	if err != nil {
+		t.Fatalf("PlayerRecipients() err = %v, want nil", err)
+	}
+	if phones == nil || len(phones) != 0 {
+		t.Errorf("PlayerRecipients() = %v, want a non-nil empty slice", phones)
+	}
+}
+
+func TestPlayerRecipientsStoreErrorPropagates(t *testing.T) {
+	wantErr := errors.New("boom")
+	st := &stubStore{participantsErr: wantErr}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.PlayerRecipients(context.Background(), testGameID)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("PlayerRecipients() err = %v, want %v (propagated, wrapped or not)", err, wantErr)
+	}
+}

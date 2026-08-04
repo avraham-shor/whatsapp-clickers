@@ -19,8 +19,8 @@ package wa
 //	Invalid code             -> story 2.4 (below)
 //	Name updated             -> story 2.4 (below)
 //	Spectator notice         -> story 2.5 (below)
-//	Question - MCQ           -> story 3.2
-//	Question - Free-Text     -> story 3.2
+//	Question - MCQ           -> story 3.2 (below)
+//	Question - Free-Text     -> story 3.2 (below)
 //	Acknowledgment           -> story 3.3
 //	Already answered         -> story 3.3
 //	Format hint (MCQ)        -> story 3.3
@@ -39,7 +39,10 @@ package wa
 // and the dependency direction means no other package ever needs these
 // strings.
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // renamePrefix is the שם: command prefix inbound.go's parseRenameName
 // recognizes. It lives here, not inbound.go, because this is the one file
@@ -136,4 +139,39 @@ const msgSpectatorNoticeReply = "המשחק כבר התחיל! נרשמת כצו
 // spectatorNoticeMessage returns the Spectator-notice copy.
 func spectatorNoticeMessage() string {
 	return msgSpectatorNoticeReply
+}
+
+// msgQuestionMCQTemplate is the Question — MCQ row: question number/total,
+// question text, the four lettered options in fixed order, then the
+// answer-format + time-limit line. Every Western-digit run is isolated via
+// ltr() at the call site — this file's header rule ("mandatory for every
+// template here") is not placeholder-only: the template's own fixed "1–4"
+// digit range is an LTR run embedded in RTL text exactly like a placeholder
+// digit, so it is isolated the same way.
+// [ASSUMPTION — EXPERIENCE.md's table shows the row as plain text with no
+// isolation marks (the rule lives in this file's header, not the table);
+// flag for confirmation if a native-speaker WhatsApp render check reveals
+// this over- or under-isolates.]
+const msgQuestionMCQTemplate = "שאלה %s מתוך %s:\n%s\nא. %s\nב. %s\nג. %s\nד. %s\nהשיבו באות (א–ד) או בספרה (%s) — יש לכם %s שניות!"
+
+// questionMCQMessage returns the finished MCQ Question copy. number/total
+// are 1-based (number is the question's Position; total is the game's
+// question count). options must have exactly 4 elements — the questions
+// table's own CHECK constraint (questions_type_shape, migration 00003)
+// already guarantees this for every mcq row; not re-validated here
+// (validate at boundaries, trust internal invariants).
+func questionMCQMessage(number, total int, text string, options []string, timeLimitSeconds int) string {
+	return fmt.Sprintf(msgQuestionMCQTemplate,
+		ltr(strconv.Itoa(number)), ltr(strconv.Itoa(total)), text,
+		options[0], options[1], options[2], options[3],
+		ltr("1–4"), ltr(strconv.Itoa(timeLimitSeconds)))
+}
+
+// msgQuestionFreeTextTemplate is the Question — Free-Text row.
+const msgQuestionFreeTextTemplate = "שאלה %s מתוך %s:\n%s\nכתבו את התשובה בהודעה — יש לכם %s שניות!"
+
+// questionFreeTextMessage returns the finished Free-Text Question copy.
+func questionFreeTextMessage(number, total int, text string, timeLimitSeconds int) string {
+	return fmt.Sprintf(msgQuestionFreeTextTemplate,
+		ltr(strconv.Itoa(number)), ltr(strconv.Itoa(total)), text, ltr(strconv.Itoa(timeLimitSeconds)))
 }
