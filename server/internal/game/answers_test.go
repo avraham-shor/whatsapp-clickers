@@ -147,8 +147,17 @@ func TestRecordAnswerClosedPreCheckSkipsFormatValidation(t *testing.T) {
 	}
 }
 
+// TestRecordAnswerMCQUnparseableReturnsFormatHint also pins the REJECTION
+// side of parseMCQOption's code-point range check (story 3.5 replaced the
+// literal-keyed map with a U+05D0 offset so this file carries no Hebrew
+// literal — CI copy-centralization). TestRecordAnswerMCQLetterAccepted
+// already pins the four accepted letters; the cases that matter after that
+// rewrite are the ones just outside the range, since a map miss and an
+// off-by-one in "offset <= 3" fail in different directions: HE (U+05D4) is
+// the very next code point after DALET and must NOT become option 5, and a
+// multi-rune reply must not decode to its first rune.
 func TestRecordAnswerMCQUnparseableReturnsFormatHint(t *testing.T) {
-	for _, raw := range []string{"5", "א.", "hello", "0"} {
+	for _, raw := range []string{"5", "א.", "hello", "0", "ה", "אב", "אא"} {
 		t.Run(raw, func(t *testing.T) {
 			st := answerStub("mcq")
 			e := NewEngine(st, "+972 50-000-0000", nil)
@@ -290,7 +299,7 @@ func TestRecordAnswerAcceptedIncludesBroadcastSnapshot(t *testing.T) {
 	}
 }
 
-// --- Grading (story 3.4) ---
+// --- Grading (stories 3.4-3.5) ---
 
 func TestRecordAnswerMCQCorrectSetsIsCorrectTrue(t *testing.T) {
 	st := answerStub("mcq")
@@ -353,9 +362,10 @@ func TestRecordAnswerFreeTextExactMatchSetsIsCorrectTrue(t *testing.T) {
 }
 
 // TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse covers this story's
-// design decision (Dev Notes): an Exact miss is graded false, not left
-// pending — Reveal must not stay permanently blocked waiting for a Fuzzy/AI
-// stage that doesn't exist yet.
+// design decision (Dev Notes): a response missing both Exact and Fuzzy is
+// graded false at stage = fuzzy — the last stage that ran, not left
+// pending — Reveal must not stay permanently blocked waiting for a stage
+// that doesn't exist yet (AI, story 3.6).
 func TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse(t *testing.T) {
 	st := answerStub("free_text")
 	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
@@ -371,8 +381,31 @@ func TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse(t *testing.T) {
 	if st.recordAnswerArg.IsCorrect {
 		t.Error("IsCorrect = true, want false")
 	}
-	if st.recordAnswerArg.Stage != grading.StageExact {
-		t.Errorf("Stage = %q, want %q (graded, not left ungraded)", st.recordAnswerArg.Stage, grading.StageExact)
+	if st.recordAnswerArg.Stage != grading.StageFuzzy {
+		t.Errorf("Stage = %q, want %q (graded, not left ungraded)", st.recordAnswerArg.Stage, grading.StageFuzzy)
+	}
+}
+
+// TestRecordAnswerFreeTextFuzzyMatchSetsIsCorrectTrue covers this story's
+// AC-1/AC-2: an Exact miss that fuzzily matches (here, a single-letter
+// typo) is graded correct at stage = fuzzy.
+func TestRecordAnswerFreeTextFuzzyMatchSetsIsCorrectTrue(t *testing.T) {
+	st := answerStub("free_text")
+	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, "ירוסלים", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
+	}
+	if !st.recordAnswerArg.IsCorrect {
+		t.Error("IsCorrect = false, want true")
+	}
+	if st.recordAnswerArg.Stage != grading.StageFuzzy {
+		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageFuzzy)
 	}
 }
 
