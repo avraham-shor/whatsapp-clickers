@@ -17,6 +17,8 @@ type Answer struct {
 	Response      string
 	ReceivedAt    time.Time
 	Seq           pgtype.Int8
+	IsCorrect     pgtype.Bool
+	Stage         pgtype.Text
 }
 
 type Game struct {

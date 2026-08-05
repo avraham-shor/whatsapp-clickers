@@ -358,11 +358,14 @@ func (q *Queries) OpenNextQuestion(ctx context.Context, arg OpenNextQuestionPara
 }
 
 const revealCurrentQuestion = `-- name: RevealCurrentQuestion :one
-UPDATE games
+UPDATE games g
 SET state = 'revealed',
     updated_at = now()
-WHERE id = $1 AND organizer_id = $2 AND state = 'question_closed'
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+FROM questions q
+WHERE g.id = $1 AND g.organizer_id = $2 AND g.state = 'question_closed'
+  AND q.game_id = g.id AND q.position = g.current_question_position
+  AND NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.stage IS NULL)
+RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at
 `
 
 type RevealCurrentQuestionParams struct {
@@ -370,9 +373,15 @@ type RevealCurrentQuestionParams struct {
 	OrganizerID string
 }
 
-// No grading-completion gate here: the answers/grading tables don't exist
-// until Stories 3.3-3.6; Story 3.4 is where "activates only once every
-// received answer is graded" gets added.
+// Reveal additionally guards on every recorded answer for the current
+// question being graded (stage IS NOT NULL) — FR-16's "Reveal control
+// activates only once every received answer is graded" (epic 3.4
+// AC-3). Grading is fully synchronous through Story 3.5, so this NOT
+// EXISTS is always vacuously true today; it becomes load-bearing once
+// Story 3.6 makes AI grading genuinely async. Write-time race-safety
+// net for the engine's own CountUngradedAnswersForCurrentQuestion
+// pre-check (game/engine.go) — same "read for message accuracy,
+// write-guard for the race" discipline as every other transition here.
 func (q *Queries) RevealCurrentQuestion(ctx context.Context, arg RevealCurrentQuestionParams) (Game, error) {
 	row := q.db.QueryRow(ctx, revealCurrentQuestion, arg.ID, arg.OrganizerID)
 	var i Game

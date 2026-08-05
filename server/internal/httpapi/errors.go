@@ -56,6 +56,8 @@ func writeStoreError(w http.ResponseWriter, err error, notFoundCode string) {
 		writeError(w, http.StatusConflict, "GAME_NOT_QUESTION_OPEN", "game must have an open question to close")
 	case errors.Is(err, game.ErrNotQuestionClosed):
 		writeError(w, http.StatusConflict, "GAME_NOT_QUESTION_CLOSED", "question must be closed before it can be revealed")
+	case errors.Is(err, game.ErrGradingIncomplete):
+		writeError(w, http.StatusConflict, "GRADING_INCOMPLETE", "not every received answer is graded yet")
 	case errors.Is(err, game.ErrNotRevealed):
 		writeError(w, http.StatusConflict, "GAME_NOT_REVEALED", "question must be revealed before advancing")
 	case errors.Is(err, game.ErrNotStoppable):

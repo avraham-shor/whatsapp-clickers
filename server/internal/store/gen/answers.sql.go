@@ -8,6 +8,8 @@ package gen
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countAnswersByQuestion = `-- name: CountAnswersByQuestion :one
@@ -25,8 +27,30 @@ func (q *Queries) CountAnswersByQuestion(ctx context.Context, questionID string)
 	return count, err
 }
 
+const countUngradedAnswersForCurrentQuestion = `-- name: CountUngradedAnswersForCurrentQuestion :one
+SELECT count(*) FROM answers a
+JOIN questions q ON q.id = a.question_id
+JOIN games g ON g.id = q.game_id
+WHERE g.id = $1 AND q.position = g.current_question_position AND a.stage IS NULL
+`
+
+// Powers the engine's pre-check before attempting RevealCurrentQuestion
+// (game/engine.go Reveal) — read-check for an accurate
+// ErrGradingIncomplete vs. ErrNotQuestionClosed distinction, mirroring
+// every other transition's "read for message accuracy, write-guard for
+// the race" discipline in this codebase. RevealCurrentQuestion's own
+// NOT EXISTS guard (games.sql) is the write-time race-safety net; this
+// is the friendlier, non-transactional read.
+func (q *Queries) CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countUngradedAnswersForCurrentQuestion, gameID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getOpenQuestionForPlayer = `-- name: GetOpenQuestionForPlayer :one
-SELECT g.id AS game_id, q.id AS question_id, q.type AS question_type, p.id AS participant_id,
+SELECT g.id AS game_id, q.id AS question_id, q.type AS question_type,
+       q.correct_option, q.accepted_answers, p.id AS participant_id,
        COALESCE(g.state = 'question_open' AND now() <= g.answer_cutoff_at, false)::boolean AS is_open,
        EXISTS (
            SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.participant_id = p.id
@@ -35,7 +59,7 @@ FROM participants p
 JOIN games g ON g.id = p.game_id
 JOIN questions q ON q.game_id = g.id AND q.position = g.current_question_position
 WHERE p.phone = $1 AND p.role = 'player'
-ORDER BY g.updated_at DESC
+ORDER BY g.updated_at DESC, q.created_at
 LIMIT 1
 `
 
@@ -43,6 +67,8 @@ type GetOpenQuestionForPlayerRow struct {
 	GameID          string
 	QuestionID      string
 	QuestionType    string
+	CorrectOption   int32
+	AcceptedAnswers []string
 	ParticipantID   string
 	IsOpen          bool
 	AlreadyAnswered bool
@@ -74,6 +100,23 @@ type GetOpenQuestionForPlayerRow struct {
 // finding, story 3.3). RecordAnswer's own guard remains the authority for
 // the read-then-write race window; these two columns are a best-effort
 // pre-check off the same read, not a replacement for it.
+//
+// correct_option/accepted_answers carry the grading inputs (story 3.4) —
+// game.RecordAnswer needs them to compute a verdict inline, and this read
+// is already the one place that resolves the current question for phone's
+// reply; a second round trip just to re-fetch the question would be pure
+// waste.
+//
+// q.created_at in the ORDER BY keeps this read's choice of question
+// identical to buildSnapshot's (questions.sql, ORDER BY q.position,
+// q.created_at) when two rows share (game_id, position). That is
+// reachable: 00003 deliberately declines UNIQUE (game_id, position) so
+// reorder can rewrite 1..N inside a transaction, and CreateQuestion's
+// max(position)+1 has no backstop against concurrent inserts. Before
+// story 3.4 a mismatch only meant a cosmetically different question row;
+// now that this SELECT also carries the grading inputs, an unordered pick
+// could grade a participant against the answer key of a question they
+// were never shown. Code review finding, story 3.4.
 func (q *Queries) GetOpenQuestionForPlayer(ctx context.Context, phone string) (GetOpenQuestionForPlayerRow, error) {
 	row := q.db.QueryRow(ctx, getOpenQuestionForPlayer, phone)
 	var i GetOpenQuestionForPlayerRow
@@ -81,6 +124,8 @@ func (q *Queries) GetOpenQuestionForPlayer(ctx context.Context, phone string) (G
 		&i.GameID,
 		&i.QuestionID,
 		&i.QuestionType,
+		&i.CorrectOption,
+		&i.AcceptedAnswers,
 		&i.ParticipantID,
 		&i.IsOpen,
 		&i.AlreadyAnswered,
@@ -89,15 +134,15 @@ func (q *Queries) GetOpenQuestionForPlayer(ctx context.Context, phone string) (G
 }
 
 const recordAnswer = `-- name: RecordAnswer :one
-INSERT INTO answers (question_id, participant_id, response, received_at)
-SELECT $1, $2, $3, $4
+INSERT INTO answers (question_id, participant_id, response, received_at, is_correct, stage)
+SELECT $1, $2, $3, $4, $5, $6
 FROM games g
 JOIN questions q ON q.id = $1 AND q.game_id = g.id
-WHERE g.id = $5
+WHERE g.id = $7
   AND g.state = 'question_open'
   AND g.current_question_position = q.position
   AND now() <= g.answer_cutoff_at
-RETURNING id, question_id, participant_id, response, received_at, seq
+RETURNING id, question_id, participant_id, response, received_at, seq, is_correct, stage
 `
 
 type RecordAnswerParams struct {
@@ -105,6 +150,8 @@ type RecordAnswerParams struct {
 	ParticipantID string
 	Response      string
 	ReceivedAt    time.Time
+	IsCorrect     pgtype.Bool
+	Stage         pgtype.Text
 	GameID        string
 }
 
@@ -132,6 +179,8 @@ func (q *Queries) RecordAnswer(ctx context.Context, arg RecordAnswerParams) (Ans
 		arg.ParticipantID,
 		arg.Response,
 		arg.ReceivedAt,
+		arg.IsCorrect,
+		arg.Stage,
 		arg.GameID,
 	)
 	var i Answer
@@ -142,6 +191,8 @@ func (q *Queries) RecordAnswer(ctx context.Context, arg RecordAnswerParams) (Ans
 		&i.Response,
 		&i.ReceivedAt,
 		&i.Seq,
+		&i.IsCorrect,
+		&i.Stage,
 	)
 	return i, err
 }

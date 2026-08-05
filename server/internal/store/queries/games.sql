@@ -82,15 +82,24 @@ SET state = 'question_closed',
 WHERE id = $1 AND organizer_id = $2 AND state = 'question_open'
 RETURNING *;
 
--- No grading-completion gate here: the answers/grading tables don't exist
--- until Stories 3.3-3.6; Story 3.4 is where "activates only once every
--- received answer is graded" gets added.
+-- Reveal additionally guards on every recorded answer for the current
+-- question being graded (stage IS NOT NULL) — FR-16's "Reveal control
+-- activates only once every received answer is graded" (epic 3.4
+-- AC-3). Grading is fully synchronous through Story 3.5, so this NOT
+-- EXISTS is always vacuously true today; it becomes load-bearing once
+-- Story 3.6 makes AI grading genuinely async. Write-time race-safety
+-- net for the engine's own CountUngradedAnswersForCurrentQuestion
+-- pre-check (game/engine.go) — same "read for message accuracy,
+-- write-guard for the race" discipline as every other transition here.
 -- name: RevealCurrentQuestion :one
-UPDATE games
+UPDATE games g
 SET state = 'revealed',
     updated_at = now()
-WHERE id = $1 AND organizer_id = $2 AND state = 'question_closed'
-RETURNING *;
+FROM questions q
+WHERE g.id = $1 AND g.organizer_id = $2 AND g.state = 'question_closed'
+  AND q.game_id = g.id AND q.position = g.current_question_position
+  AND NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.stage IS NULL)
+RETURNING g.*;
 
 -- Same shape as StartGameFirstQuestion, guarded from 'revealed' instead of
 -- 'lobby' and parameterized on the target position (current + 1) instead of

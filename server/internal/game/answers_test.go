@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/avraham-shor/whatsapp-clickers/internal/grading"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store/gen"
 )
@@ -286,6 +287,148 @@ func TestRecordAnswerAcceptedIncludesBroadcastSnapshot(t *testing.T) {
 	}
 	if result.Snapshot.GameID != testGameID {
 		t.Errorf("Snapshot.GameID = %q, want %q (caller broadcasts only when non-empty)", result.Snapshot.GameID, testGameID)
+	}
+}
+
+// --- Grading (story 3.4) ---
+
+func TestRecordAnswerMCQCorrectSetsIsCorrectTrue(t *testing.T) {
+	st := answerStub("mcq")
+	st.getOpenQuestionForPlayerResult.CorrectOption = 2
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, "2", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
+	}
+	if !st.recordAnswerArg.IsCorrect {
+		t.Error("IsCorrect = false, want true")
+	}
+	if st.recordAnswerArg.Stage != grading.StageMCQ {
+		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageMCQ)
+	}
+}
+
+func TestRecordAnswerMCQIncorrectSetsIsCorrectFalse(t *testing.T) {
+	st := answerStub("mcq")
+	st.getOpenQuestionForPlayerResult.CorrectOption = 2
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
+	}
+	if st.recordAnswerArg.IsCorrect {
+		t.Error("IsCorrect = true, want false")
+	}
+	if st.recordAnswerArg.Stage != grading.StageMCQ {
+		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageMCQ)
+	}
+}
+
+func TestRecordAnswerFreeTextExactMatchSetsIsCorrectTrue(t *testing.T) {
+	st := answerStub("free_text")
+	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים", "ירושלים עיר הקודש"}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, "ירושלים", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
+	}
+	if !st.recordAnswerArg.IsCorrect {
+		t.Error("IsCorrect = false, want true")
+	}
+	if st.recordAnswerArg.Stage != grading.StageExact {
+		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageExact)
+	}
+}
+
+// TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse covers this story's
+// design decision (Dev Notes): an Exact miss is graded false, not left
+// pending — Reveal must not stay permanently blocked waiting for a Fuzzy/AI
+// stage that doesn't exist yet.
+func TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse(t *testing.T) {
+	st := answerStub("free_text")
+	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
+	}
+	if st.recordAnswerArg.IsCorrect {
+		t.Error("IsCorrect = true, want false")
+	}
+	if st.recordAnswerArg.Stage != grading.StageExact {
+		t.Errorf("Stage = %q, want %q (graded, not left ungraded)", st.recordAnswerArg.Stage, grading.StageExact)
+	}
+}
+
+// Written as rune values, not literals: the characters are invisible in an
+// editor and a literal U+FEFF is rejected by the compiler.
+var (
+	testLRM = string(rune(0x200e)) // LEFT-TO-RIGHT MARK
+	testRLM = string(rune(0x200f)) // RIGHT-TO-LEFT MARK
+	testBOM = string(rune(0xfeff)) // ZERO WIDTH NO-BREAK SPACE
+)
+
+// TestRecordAnswerFreeTextIgnoresInvisibleFormatMarks covers a code review
+// finding: Hebrew mobile keyboards and copy-paste inject category-Cf marks
+// that strings.TrimSpace does not remove, so without stripFormatMarks they
+// reach GradeExact's byte comparison and mark a visually identical answer
+// incorrect — with the participant still receiving the normal ack.
+func TestRecordAnswerFreeTextIgnoresInvisibleFormatMarks(t *testing.T) {
+	st := answerStub("free_text")
+	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, testRLM+"ירושלים"+testLRM, time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
+	}
+	if !st.recordAnswerArg.IsCorrect {
+		t.Error("IsCorrect = false, want true (invisible marks must not defeat an exact match)")
+	}
+	// The persisted response must be the stripped form too — a stored
+	// answer carrying invisible marks would re-break any later comparison
+	// (Story 3.7 scoring, 3.8 personal results).
+	if st.recordAnswerArg.Response != "ירושלים" {
+		t.Errorf("Response = %q, want the stripped form", st.recordAnswerArg.Response)
+	}
+}
+
+// TestRecordAnswerMCQIgnoresInvisibleFormatMarks covers the same class on
+// the mcq branch, where a mark instead defeats parseMCQOption and the
+// sender gets the format hint for a reply that looks perfectly valid.
+func TestRecordAnswerMCQIgnoresInvisibleFormatMarks(t *testing.T) {
+	st := answerStub("mcq")
+	st.getOpenQuestionForPlayerResult.CorrectOption = 2
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, testBOM+"2"+testRLM, time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Fatalf("Outcome = %q, want AnswerAccepted (marks must not earn a format hint)", result.Outcome)
+	}
+	if !st.recordAnswerArg.IsCorrect {
+		t.Error("IsCorrect = false, want true")
 	}
 }
 
