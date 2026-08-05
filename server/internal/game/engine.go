@@ -38,6 +38,13 @@ var ErrNotRevealed = errors.New("game: not in revealed state")
 // can be aborted from — the rejection for StopGame.
 var ErrNotStoppable = errors.New("game: cannot be stopped from its current state")
 
+// ErrGradingIncomplete means the current question's answers aren't all
+// graded yet — the rejection for Reveal when grading is still in
+// flight (FR-16 epic AC-3). A no-op condition in this story (MCQ/Exact
+// grading is synchronous); load-bearing from Story 3.6's async AI
+// stage onward.
+var ErrGradingIncomplete = errors.New("game: grading not yet complete for current question")
+
 // Store is the persistence surface the engine needs; *store.Store satisfies
 // it. Consumer-defined here, not in store, per the dependency direction
 // (game imports store, never the reverse).
@@ -58,6 +65,7 @@ type Store interface {
 	GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error)
 	RecordAnswer(ctx context.Context, arg store.RecordAnswerParams) (gen.Answer, error)
 	CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error)
+	CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error)
 }
 
 // Engine is the single write path for games.state (Enforcement Guidelines:
@@ -164,7 +172,8 @@ func (e *Engine) CloseQuestion(ctx context.Context, gameID, organizerID string) 
 // Reveal transitions gameID from question_closed to revealed and returns
 // the resulting snapshot. A game not currently question_closed (including
 // one that lost a concurrent transition race) is ErrNotQuestionClosed; a
-// missing/foreign game is store.ErrNotFound.
+// missing/foreign game is store.ErrNotFound; a question_closed game with
+// outstanding ungraded answers is ErrGradingIncomplete (FR-16 epic AC-3).
 func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
 	g, err := e.store.GetGameForOrganizer(ctx, gameID, organizerID)
 	if err != nil {
@@ -173,9 +182,38 @@ func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapsh
 	if g.State != StateQuestionClosed {
 		return Snapshot{}, ErrNotQuestionClosed
 	}
+	outstanding, err := e.store.CountUngradedAnswersForCurrentQuestion(ctx, gameID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if outstanding > 0 {
+		return Snapshot{}, ErrGradingIncomplete
+	}
 	g, err = e.store.RevealCurrentQuestion(ctx, gameID, organizerID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			// The write-time guard failed after a successful read. Unlike
+			// every other transition in this file, this guard is no longer
+			// single-condition — it can miss because a concurrent
+			// transition moved the game off question_closed, because no
+			// questions row matches current_question_position (the
+			// UPDATE ... FROM join is inner), or because an answer for the
+			// current question is ungraded. All three collapse to
+			// ErrNotQuestionClosed, so the reported cause can be wrong.
+			//
+			// Note the count above cannot go stale underneath us: an
+			// answer can only be inserted while the game is question_open
+			// (RecordAnswer's own guard), and Reveal runs only from
+			// question_closed, so there is no window for a fresh ungraded
+			// answer to appear between the count and this write. The
+			// collapse is tolerable today because the join condition is
+			// unreachable in practice — question_closed is only arrived at
+			// via StartGameFirstQuestion/OpenNextQuestion, both of which
+			// require the matching questions row to exist, and every
+			// question mutation is state='draft'-guarded. Revisit when
+			// Story 3.6 makes the grading condition genuinely reachable:
+			// at that point these deserve distinct errors rather than one
+			// message that can send an operator after the wrong problem.
 			return Snapshot{}, ErrNotQuestionClosed
 		}
 		return Snapshot{}, err

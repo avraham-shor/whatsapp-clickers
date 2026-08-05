@@ -7,8 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
+	"github.com/avraham-shor/whatsapp-clickers/internal/grading"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 )
 
@@ -67,6 +69,33 @@ func parseMCQOption(body string) (option int, ok bool) {
 	return 0, false
 }
 
+// stripFormatMarks removes the invisible Unicode format characters
+// (category Cf) that Hebrew mobile keyboards and copy-paste routinely
+// inject — RIGHT-TO-LEFT MARK, LEFT-TO-RIGHT MARK, the BOM / zero-width
+// no-break space, and the zero-width joiners. strings.TrimSpace cannot
+// remove them: unicode.IsSpace covers Zs plus \t\n\v\f\r, U+0085 and
+// U+00A0, none of which are Cf. Left in, they survive into
+// grading.GradeExact's byte comparison and mark a visually identical
+// Hebrew answer incorrect, while the participant still receives the
+// normal ack and has no way to discover why; in the mcq branch they turn
+// an otherwise valid "2" into an unparseable reply that earns the format
+// hint. Distinct from the spelling variants (nikud, final-letter forms,
+// punctuation) deliberately deferred to Story 3.5's Fuzzy stage: those
+// are visible differences a human can recognize and correct, an invisible
+// byte is not. Code review finding, story 3.4.
+//
+// Matched by Unicode category rather than an enumerated list of code
+// points: the whole class is unwanted here, the literals are invisible in
+// an editor, and a literal U+FEFF is rejected outright by the compiler.
+func stripFormatMarks(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // RecordAnswer processes phone's reply as an answer attempt.
 //
 // receivedAt is the Go-process webhook-ingestion clock
@@ -108,20 +137,32 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 		return AnswerResult{Outcome: AnswerClosed}, nil
 	}
 
+	// Strip invisible format marks before any parsing, length check or
+	// grading — see stripFormatMarks. Applied once here rather than per
+	// branch: both the mcq parse and the free_text comparison are equally
+	// defeated by a mark the sender cannot see.
+	body := stripFormatMarks(rawText)
+
 	var response string
+	var isCorrect bool
+	var stage grading.Stage
 	switch qc.QuestionType {
 	case "mcq":
-		option, ok := parseMCQOption(rawText)
+		option, ok := parseMCQOption(body)
 		if !ok {
 			return AnswerResult{Outcome: AnswerFormatHint}, nil
 		}
 		response = strconv.Itoa(option)
+		isCorrect = grading.GradeMCQ(response, int(qc.CorrectOption))
+		stage = grading.StageMCQ
 	case "free_text":
-		trimmed := strings.TrimSpace(rawText)
+		trimmed := strings.TrimSpace(body)
 		if utf8.RuneCountInString(trimmed) > maxFreeTextAnswerLength {
 			return AnswerResult{Outcome: AnswerTooLong}, nil
 		}
 		response = trimmed
+		isCorrect = grading.GradeExact(response, qc.AcceptedAnswers)
+		stage = grading.StageExact
 	default:
 		// questions_type_shape's CHECK constraint guarantees this never
 		// happens for a real row — fail closed with an error (degrades to
@@ -136,6 +177,8 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 		ParticipantID: qc.ParticipantID,
 		Response:      response,
 		ReceivedAt:    receivedAt,
+		IsCorrect:     isCorrect,
+		Stage:         stage,
 	})
 	switch {
 	case err == nil:

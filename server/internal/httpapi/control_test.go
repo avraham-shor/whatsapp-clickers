@@ -377,6 +377,28 @@ func TestControlActionDomainErrorReturns409WithoutBroadcasting(t *testing.T) {
 	}
 }
 
+// TestHandleRevealGradingIncompleteReturns409WithoutBroadcasting covers
+// Reveal's second rejection (story 3.4, FR-16 epic AC-3) — a distinct
+// GRADING_INCOMPLETE 409, not folded into controlActionCases' one-
+// representative-error-per-endpoint table above (that table already
+// covers Reveal's other rejection, ErrNotQuestionClosed).
+func TestHandleRevealGradingIncompleteReturns409WithoutBroadcasting(t *testing.T) {
+	engine := &stubControlEngine{revealErr: game.ErrGradingIncomplete}
+	hub := &stubBroadcaster{}
+	rec := httptest.NewRecorder()
+	controlRouter(engine, hub).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/reveal", ""))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("POST /reveal on grading-incomplete = %d, want 409", rec.Code)
+	}
+	if code := decodeErrorCode(t, rec.Body.Bytes()); code != "GRADING_INCOMPLETE" {
+		t.Errorf("error code = %q, want GRADING_INCOMPLETE", code)
+	}
+	if len(hub.calls) != 0 {
+		t.Error("Broadcast called on a rejected transition")
+	}
+}
+
 func TestControlActionForeignOrMissingGameReturns404(t *testing.T) {
 	for _, tc := range controlActionCases {
 		t.Run(tc.name, func(t *testing.T) {

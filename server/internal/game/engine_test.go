@@ -88,6 +88,10 @@ type stubStore struct {
 
 	countAnswersByQuestionResult int64
 	countAnswersByQuestionErr    error
+
+	countUngradedAnswersForCurrentQuestionResult int64
+	countUngradedAnswersForCurrentQuestionErr    error
+	countUngradedAnswersForCurrentQuestionCalls  int
 }
 
 func (s *stubStore) GetGameForOrganizer(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
@@ -185,6 +189,11 @@ func (s *stubStore) RecordAnswer(ctx context.Context, arg store.RecordAnswerPara
 
 func (s *stubStore) CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error) {
 	return s.countAnswersByQuestionResult, s.countAnswersByQuestionErr
+}
+
+func (s *stubStore) CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error) {
+	s.countUngradedAnswersForCurrentQuestionCalls++
+	return s.countUngradedAnswersForCurrentQuestionResult, s.countUngradedAnswersForCurrentQuestionErr
 }
 
 func draftStub() *stubStore {
@@ -575,6 +584,58 @@ func TestRevealRaceLossReturnsErrNotQuestionClosed(t *testing.T) {
 	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if !errors.Is(err, ErrNotQuestionClosed) {
 		t.Fatalf("Reveal() err = %v, want ErrNotQuestionClosed (race loss reinterpreted)", err)
+	}
+}
+
+func TestRevealSucceedsWhenNoOutstandingGrades(t *testing.T) {
+	st := questionClosedStub()
+	st.countUngradedAnswersForCurrentQuestionResult = 0
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Reveal() err = %v, want nil", err)
+	}
+	if snap.State != StateRevealed {
+		t.Errorf("State = %q, want revealed", snap.State)
+	}
+	if st.countUngradedAnswersForCurrentQuestionCalls != 1 {
+		t.Errorf("CountUngradedAnswersForCurrentQuestion called %d times, want 1", st.countUngradedAnswersForCurrentQuestionCalls)
+	}
+	if st.revealCurrentQuestionCalls != 1 {
+		t.Errorf("RevealCurrentQuestion called %d times, want 1", st.revealCurrentQuestionCalls)
+	}
+}
+
+func TestRevealReturnsErrGradingIncompleteWhenOutstandingGradesExist(t *testing.T) {
+	st := questionClosedStub()
+	st.countUngradedAnswersForCurrentQuestionResult = 1
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrGradingIncomplete) {
+		t.Fatalf("Reveal() err = %v, want ErrGradingIncomplete", err)
+	}
+	if st.revealCurrentQuestionCalls != 0 {
+		t.Errorf("RevealCurrentQuestion called %d times, want 0 (the guarded write must never be attempted)", st.revealCurrentQuestionCalls)
+	}
+}
+
+func TestRevealPropagatesCountUngradedAnswersError(t *testing.T) {
+	boom := errors.New("boom")
+	st := questionClosedStub()
+	st.countUngradedAnswersForCurrentQuestionErr = boom
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	// errors.Is against the injected sentinel, not merely "some error that
+	// isn't one of ours" — the weaker form passed for any newly-introduced
+	// third sentinel (3.2's review precedent, and this story's Task 4).
+	if !errors.Is(err, boom) {
+		t.Fatalf("Reveal() err = %v, want the store error propagated unwrapped", err)
+	}
+	if st.revealCurrentQuestionCalls != 0 {
+		t.Errorf("RevealCurrentQuestion called %d times, want 0 (a failed count must not fall through to the write)", st.revealCurrentQuestionCalls)
 	}
 }
 

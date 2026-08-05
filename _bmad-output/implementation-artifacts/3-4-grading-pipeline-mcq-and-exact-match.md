@@ -4,7 +4,7 @@ baseline_commit: b21ed05bf3c0cd44882eeb68a552ed105f1ff221
 
 # Story 3.4: Grading Pipeline — MCQ and Exact Match
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -28,8 +28,8 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Migration — grading columns on `answers`** (AC: 1, 2, 3)
-  - [ ] New `server/migrations/00011_answer_grading.sql`:
+- [x] **Task 1: Migration — grading columns on `answers`** (AC: 1, 2, 3)
+  - [x] New `server/migrations/00011_answer_grading.sql`:
     ```sql
     -- +goose Up
     -- Nullable now even though this story's write path (game.RecordAnswer)
@@ -51,8 +51,8 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
     ```
     Story 3.5/3.6 will each widen the `stage` CHECK (`'fuzzy'`, `'ai'`) in their own migrations — do not pre-add those values now.
 
-- [ ] **Task 2: New `grading` package — MCQ mechanical + Exact stage** (AC: 1, 2)
-  - [ ] New `server/internal/grading/pipeline.go`:
+- [x] **Task 2: New `grading` package — MCQ mechanical + Exact stage** (AC: 1, 2)
+  - [x] New `server/internal/grading/pipeline.go`:
     ```go
     // Package grading implements FR-15/FR-16's answer-correctness pipeline —
     // MCQ mechanical grading and Free-Text's Exact → Fuzzy → AI stages
@@ -100,12 +100,12 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
         return false
     }
     ```
-  - [ ] New `server/internal/grading/pipeline_test.go`: table-driven tests —
+  - [x] New `server/internal/grading/pipeline_test.go`: table-driven tests —
     - `TestGradeMCQ`: cases for each `correctOption` 1-4 with a matching response, a mismatching response, and an out-of-range response (e.g. `"5"` — defensive; `game.parseMCQOption` already excludes this, but the function itself must not panic).
     - `TestGradeExact`: single accepted answer match; multi-value `acceptedAnswers` matching the first/middle/last entry; no match; response differing only by trailing whitespace the caller didn't trim (must NOT match — proves this stage does no normalization of its own); empty `response` against a non-empty accepted answer (no match).
 
-- [ ] **Task 3: `store` package — thread grading into `RecordAnswer`, add the outstanding-grade count** (AC: 1, 2, 3)
-  - [ ] `server/internal/store/queries/answers.sql` — extend the existing `GetOpenQuestionForPlayer` SELECT to also carry the grading inputs (currently only selects `game_id, question_id, question_type, participant_id`):
+- [x] **Task 3: `store` package — thread grading into `RecordAnswer`, add the outstanding-grade count** (AC: 1, 2, 3)
+  - [x] `server/internal/store/queries/answers.sql` — extend the existing `GetOpenQuestionForPlayer` SELECT to also carry the grading inputs (currently only selects `game_id, question_id, question_type, participant_id`):
     ```sql
     -- name: GetOpenQuestionForPlayer :one
     SELECT g.id AS game_id, q.id AS question_id, q.type AS question_type,
@@ -147,7 +147,7 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
     JOIN games g ON g.id = q.game_id
     WHERE g.id = sqlc.arg(game_id) AND q.position = g.current_question_position AND a.stage IS NULL;
     ```
-  - [ ] `server/internal/store/queries/games.sql` — `RevealCurrentQuestion` currently reads (no FROM clause):
+  - [x] `server/internal/store/queries/games.sql` — `RevealCurrentQuestion` currently reads (no FROM clause):
     ```sql
     -- name: RevealCurrentQuestion :one
     UPDATE games
@@ -176,8 +176,8 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
       AND NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.stage IS NULL)
     RETURNING g.*;
     ```
-  - [ ] Run `sqlc generate` (from `server/`) — expected non-empty diff (new `Answer.IsCorrect`/`Answer.Stage` as `pgtype.Bool`/`pgtype.Text` in `gen/models.go`, extended `GetOpenQuestionForPlayerRow`/`RecordAnswerParams`, new `CountUngradedAnswersForCurrentQuestion`); commit the generated files.
-  - [ ] `server/internal/store/answers.go`: extend `RecordAnswerParams` with `IsCorrect bool` and `Stage string`, thread both into the `gen.RecordAnswerParams{}` literal inside `RecordAnswer`; add:
+  - [x] Run `sqlc generate` (from `server/`) — expected non-empty diff (new `Answer.IsCorrect`/`Answer.Stage` as `pgtype.Bool`/`pgtype.Text` in `gen/models.go`, extended `GetOpenQuestionForPlayerRow`/`RecordAnswerParams`, new `CountUngradedAnswersForCurrentQuestion`); commit the generated files.
+  - [x] `server/internal/store/answers.go`: extend `RecordAnswerParams` with `IsCorrect bool` and `Stage string`, thread both into the `gen.RecordAnswerParams{}` literal inside `RecordAnswer`; add:
     ```go
     // CountUngradedAnswersForCurrentQuestion returns how many recorded
     // answers for gameID's current question have not yet been graded
@@ -188,8 +188,8 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
     ```
     (Field order inside the `gen.RecordAnswerParams{}` literal must match whatever sqlc actually generates — check the generated file, same caveat 3.3 already carries for this same struct literal.)
 
-- [ ] **Task 4: `game` package — grade inline in `RecordAnswer`, gate `Reveal`** (AC: 1, 2, 3)
-  - [ ] `server/internal/game/answers.go`: add `"github.com/avraham-shor/whatsapp-clickers/internal/grading"` to imports. Inside `RecordAnswer`, after the existing `switch qc.QuestionType` block resolves `response`, compute the verdict per branch and thread it into the store call:
+- [x] **Task 4: `game` package — grade inline in `RecordAnswer`, gate `Reveal`** (AC: 1, 2, 3)
+  - [x] `server/internal/game/answers.go`: add `"github.com/avraham-shor/whatsapp-clickers/internal/grading"` to imports. Inside `RecordAnswer`, after the existing `switch qc.QuestionType` block resolves `response`, compute the verdict per branch and thread it into the store call:
     ```go
     var response string
     var isCorrect bool
@@ -226,7 +226,7 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
     })
     ```
     `AnswerResult`/`AnswerOutcome` are **unchanged** — no `IsCorrect` field is added to either; the grade never needs to reach `wa`'s ack path (FR-15's "never disclosed before Reveal" — the ack is always "התקבל ✓" regardless of correctness, already true since 3.3).
-  - [ ] `server/internal/game/engine.go`: add to the `Store` interface: `CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error)`. Add a new sentinel error near the other `ErrNot*` vars:
+  - [x] `server/internal/game/engine.go`: add to the `Store` interface: `CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error)`. Add a new sentinel error near the other `ErrNot*` vars:
     ```go
     // ErrGradingIncomplete means the current question's answers aren't all
     // graded yet — the rejection for Reveal when grading is still in
@@ -271,18 +271,18 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
         return e.snapshotAfterCommit(ctx, g), nil
     }
     ```
-  - [ ] `server/internal/httpapi/errors.go`: add a case to `writeStoreError`, immediately after the `game.ErrNotQuestionClosed` case (both concern `/reveal`):
+  - [x] `server/internal/httpapi/errors.go`: add a case to `writeStoreError`, immediately after the `game.ErrNotQuestionClosed` case (both concern `/reveal`):
     ```go
     case errors.Is(err, game.ErrGradingIncomplete):
         writeError(w, http.StatusConflict, "GRADING_INCOMPLETE", "not every received answer is graded yet")
     ```
-  - [ ] `server/internal/game/engine_test.go`: extend `stubStore` with `countUngradedAnswersForCurrentQuestionResult int64`, `countUngradedAnswersForCurrentQuestionErr error`, `countUngradedAnswersForCurrentQuestionCalls int` + the method (zero-value default `0, nil` keeps every pre-existing `Reveal` test passing unchanged — 0 outstanding is the common case). Also extend `getOpenQuestionForPlayerResult`'s construction in existing tests where relevant — `gen.GetOpenQuestionForPlayerRow` gains `CorrectOption`/`AcceptedAnswers` fields; any test building this struct literal for `mcq`/`free_text` question types must set them for the new grading assertions to be meaningful. New tests (in `answers_test.go` if 3.3 created one by the time this story is implemented, else appended to `engine_test.go` — check which exists first):
+  - [x] `server/internal/game/engine_test.go`: extend `stubStore` with `countUngradedAnswersForCurrentQuestionResult int64`, `countUngradedAnswersForCurrentQuestionErr error`, `countUngradedAnswersForCurrentQuestionCalls int` + the method (zero-value default `0, nil` keeps every pre-existing `Reveal` test passing unchanged — 0 outstanding is the common case). Also extend `getOpenQuestionForPlayerResult`'s construction in existing tests where relevant — `gen.GetOpenQuestionForPlayerRow` gains `CorrectOption`/`AcceptedAnswers` fields; any test building this struct literal for `mcq`/`free_text` question types must set them for the new grading assertions to be meaningful. New tests (in `answers_test.go` if 3.3 created one by the time this story is implemented, else appended to `engine_test.go` — check which exists first):
     - `TestRecordAnswerMCQCorrectSetsIsCorrectTrue` / `TestRecordAnswerMCQIncorrectSetsIsCorrectFalse` — assert `recordAnswerArg.IsCorrect` and `recordAnswerArg.Stage == grading.StageMCQ`.
     - `TestRecordAnswerFreeTextExactMatchSetsIsCorrectTrue` / `TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse` — assert `recordAnswerArg.Stage == grading.StageExact` in both cases (a miss is still "graded exact, false" — not left ungraded).
     - `TestRevealSucceedsWhenNoOutstandingGrades` — extend/confirm the existing happy-path `Reveal` test still passes with the new pre-check in place (0 outstanding, `RevealCurrentQuestion` called once).
     - `TestRevealReturnsErrGradingIncompleteWhenOutstandingGradesExist` — `countUngradedAnswersForCurrentQuestionResult = 1` → `ErrGradingIncomplete`; assert `revealCurrentQuestionCalls == 0` (the guarded write must never be attempted).
     - `TestRevealPropagatesCountUngradedAnswersError` — an unrelated store error from the count call propagates unwrapped (`errors.Is`, not string equality — 3.2's review precedent).
-  - [ ] `server/internal/httpapi/control_test.go`: `controlActionCases`' existing `"Reveal"` row already covers `ErrNotQuestionClosed` → 409 `GAME_NOT_QUESTION_CLOSED` via the shared per-endpoint suite — do not add a second row there (that table verifies one representative error per endpoint, not every possible error a given endpoint can return). Add one focused test mirroring `TestControlActionDomainErrorReturns409WithoutBroadcasting`'s body, scoped to Reveal only:
+  - [x] `server/internal/httpapi/control_test.go`: `controlActionCases`' existing `"Reveal"` row already covers `ErrNotQuestionClosed` → 409 `GAME_NOT_QUESTION_CLOSED` via the shared per-endpoint suite — do not add a second row there (that table verifies one representative error per endpoint, not every possible error a given endpoint can return). Add one focused test mirroring `TestControlActionDomainErrorReturns409WithoutBroadcasting`'s body, scoped to Reveal only:
     ```go
     func TestHandleRevealGradingIncompleteReturns409WithoutBroadcasting(t *testing.T) {
         engine := &stubControlEngine{revealErr: game.ErrGradingIncomplete}
@@ -302,9 +302,9 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
     }
     ```
 
-- [ ] **Task 5: Quality gates + local E2E** (all ACs)
-  - [ ] Local gates: `gofmt -l .` · `go1.26.5 vet ./...` · `go1.26.5 test ./...` (zero regressions) · `sqlc generate` diff — expected non-empty (Task 3), confirm it matches exactly what Task 3 wrote. No `web/` changes in this story — skip `npm run lint`/`tsc -b` only if genuinely nothing under `web/` changed; run them anyway if unsure, they should no-op.
-  - [ ] Local Go E2E (`cmd/e2escratch`, deleted after use, same pattern as 2.1–3.3 — **requires 3.3's Task 4 (wa routing) to be done first**, since this is the only path that exercises `RecordAnswer` end-to-end): create a scratch game with one MCQ question (correct option known, e.g. option 2) and one Free-Text question (accepted answers `["ירושלים", "ירושלים עיר הקודש"]`). Open lobby, join 3 players (A, B, C). `POST /start` (opens Q1, MCQ). Drive via signed inbound webhook `POST`s:
+- [x] **Task 5: Quality gates + local E2E** (all ACs)
+  - [x] Local gates: `gofmt -l .` · `go1.26.5 vet ./...` · `go1.26.5 test ./...` (zero regressions) · `sqlc generate` diff — expected non-empty (Task 3), confirm it matches exactly what Task 3 wrote. No `web/` changes in this story — skip `npm run lint`/`tsc -b` only if genuinely nothing under `web/` changed; run them anyway if unsure, they should no-op.
+  - [x] Local Go E2E (`cmd/e2escratch`, deleted after use, same pattern as 2.1–3.3 — **requires 3.3's Task 4 (wa routing) to be done first**, since this is the only path that exercises `RecordAnswer` end-to-end): create a scratch game with one MCQ question (correct option known, e.g. option 2) and one Free-Text question (accepted answers `["ירושלים", "ירושלים עיר הקודש"]`). Open lobby, join 3 players (A, B, C). `POST /start` (opens Q1, MCQ). Drive via signed inbound webhook `POST`s:
     - A replies `"2"` (correct) — after the send, query the scratch DB directly (`SELECT is_correct, stage FROM answers WHERE ...`) and assert `is_correct = true, stage = 'mcq'`.
     - B replies `"1"` (incorrect) — assert `is_correct = false, stage = 'mcq'`.
     - `POST /close-question` → `POST /reveal`: must succeed (200), since both recorded answers are already graded — this is the "gate is vacuously satisfied" case AC-3 describes.
@@ -312,6 +312,24 @@ At the time this story was created, **Story 3.3 (Answer Intake) is only partiall
     - `POST /close-question` → `POST /reveal`: must again succeed 200 (all three graded, including C's miss).
     - No way to directly exercise the `GRADING_INCOMPLETE` 409 path in this E2E — nothing in this story's implemented pipeline is asynchronous, so no answer is ever left ungraded at the point Reveal is attempted. That branch is verified only by the unit tests in Task 4 (mocking `countUngradedAnswersForCurrentQuestionResult > 0`). Note this explicitly in the Completion Notes rather than contriving a fake DB row to force it.
     - Clean up the scratch game row afterward; delete the harness afterward — same convention as every prior story.
+
+### Review Findings
+
+Code review 2026-08-05. Layers: Blind Hunter ✅, Edge Case Hunter ✅, Acceptance Auditor ❌ (aborted on session limit — acceptance dimension covered inline by the reviewer instead: all 3 ACs verified satisfied, all 5 task boxes verified present in the diff, all 5 architecture guardrails verified intact, all quality gates independently re-run green).
+
+- [x] [Review][Defer] **Rolling-deploy window writes permanently-ungraded rows that no backfill can reach** — *Decision 2026-08-05: backfill the certain case (patch below), document this residual window; revisit trigger Story 3.6.* Note the reviewer initially proposed scoping the gate to `received_at >= goose_db_version.tstamp` and then corrected it: rows from the overlapping old instance are written **after** the migration timestamp, so tstamp-scoping does not exclude them — it only solves the pre-existing-rows case the backfill already covers. — `store/migrate.go:23-24` documents that "zero-downtime redeploys briefly run two instances, and both boot through this path." Once the new instance applies 00011, the still-serving 3.3 instance keeps inserting with its old column list; `is_correct`/`stage` default to NULL and `answers_grading_shape` is satisfied by `(NULL,NULL)`, so the write succeeds silently and the participant even gets a normal ack. Those rows are created *after* any Up-migration backfill runs, so the backfill patch below does not cover them, and (per the finding directly beneath) nothing can ever grade them. Options: (a) scope the gate to rows the current binary could have written, e.g. `AND a.received_at >= (SELECT tstamp FROM goose_db_version WHERE version_id = 11)`; (b) accept the window as pilot-acceptable and document it; (c) two-phase — land nullable now, add `NOT NULL` in a follow-up migration once no old instance can write. [server/migrations/00011_answer_grading.sql, server/internal/store/queries/answers.sql]
+- [x] [Review][Patch] **Duplicate `(game_id, position)` questions now corrupt the answer key, not just ordering** — *Decision 2026-08-05: option (b) — align `GetOpenQuestionForPlayer`'s ordering with `buildSnapshot`; no UNIQUE index (it would fight the documented transactional reorder).* — `00003_games_questions.sql:19-20` deliberately declines `UNIQUE (game_id, position)` ("reorder rewrites positions 1..N inside a transaction instead of fighting a deferred constraint"), and `CreateQuestion` computes `COALESCE(max(position),0)+1` with no backstop, so two concurrent creates in READ COMMITTED can both land on the same position. This story is what first makes that consequential: `GetOpenQuestionForPlayer` now pulls `q.correct_option`/`q.accepted_answers` off a row chosen nondeterministically (its `ORDER BY g.updated_at DESC LIMIT 1` ranks only the *game*), while the question actually broadcast to players comes from `buildSnapshot`'s `ORDER BY q.position, q.created_at` — i.e. the older row. Participants can be graded against an answer key belonging to a question they were never shown, silently. Separately, the two Reveal guards diverge: `CountUngradedAnswersForCurrentQuestion` counts across both duplicates, but `RevealCurrentQuestion`'s `NOT EXISTS` is evaluated per join row, so either guard can permit what the other blocks. Options: (a) add `CREATE UNIQUE INDEX ON questions (game_id, position)` — needs confirmation it does not break the documented transactional-reorder strategy; (b) align `GetOpenQuestionForPlayer` with `buildSnapshot` via `ORDER BY q.created_at LIMIT 1` (masks rather than fixes); (c) defer as unreachable at pilot scale (one organizer, no concurrent question creation). [server/internal/store/queries/answers.sql:34-45, server/internal/store/queries/games.sql, server/migrations/00003_games_questions.sql:19-20]
+- [x] [Review][Patch] **Bidi/zero-width marks survive `TrimSpace`, so a visually identical Hebrew answer grades false** — *Decision 2026-08-05: option (a) — fix in this story; treated as correctness, not fuzzy matching.* — `strings.TrimSpace` uses `unicode.IsSpace`, which covers Zs/`\t\n\v\f\r`/U+0085/U+00A0 but *not* category Cf, so U+200F (RLM), U+200E (LRM) and U+FEFF pass straight through into `GradeExact`'s byte comparison. A player answering `ירושלים` from a Hebrew mobile keyboard or a paste carrying an invisible mark is marked incorrect, receives the normal ack, and has no way to see why. This is categorically different from the nikud/final-letter/punctuation variants the `grading` package doc comment defers to Story 3.5 — those are visible spelling differences a human can recognize and correct; this is an invisible byte. Story 3.5 (Hebrew fuzzy matching) is `ready-for-dev` right now, so the question is genuinely one of scope: (a) strip Cf runes in `game.RecordAnswer` before the length check and grading (~3 lines, arguably a *correctness* fix rather than fuzzy matching); (b) fold it into Story 3.5's normalization work; (c) accept. [server/internal/game/answers.go:125, server/internal/grading/pipeline.go]
+- [x] [Review][Patch] Migration 00011 has no backfill, so every pre-3.4 answer row is permanently ungraded and permanently blocks Reveal — story 3.3 is already on `origin/main` (`8d41b4b`) with Railway auto-deploy, so real `answers` rows exist; the `ADD CONSTRAINT` scan passes on them (`(NULL IS NULL) = (NULL IS NULL)` → TRUE) so the migration succeeds and the damage is purely behavioral. Both review layers flagged this independently, and it directly falsifies the claim asserted in `games.sql`/`gen/games.sql.go` that the `NOT EXISTS` guard "is always vacuously true today" — true only for rows written after 00011. Amplifier confirmed by grep: there is **no `UPDATE answers` statement anywhere** in `internal/` or `migrations/`, no re-grade path, and no force-reveal override, so `ErrGradingIncomplete` has no exit but `StopGame` or manual production SQL. [server/migrations/00011_answer_grading.sql:8-10]
+- [x] [Review][Patch] `Reveal`'s new race-window comment describes an unreachable race and omits the real one — the comment claims the guard can miss because "a fresh ungraded answer landed in the race window between the count above and this write," but `RecordAnswer`'s INSERT requires `g.state = 'question_open'` while `Reveal` runs only at `question_closed`, so that window is empty. Meanwhile the comment still calls the collapse "an accepted approximation of the single-condition race-loss mapping" after the author added a third join condition (`q.game_id = g.id AND q.position = g.current_question_position`) to the guarded UPDATE. Both layers flagged the comment as false; the code is fine, the reasoning recorded next to it is not. [server/internal/game/engine.go:206-213]
+- [x] [Review][Patch] Postgres `23514` (check violation) is unmapped in `store.RecordAnswer`, so a bad `stage` silently drops the answer — the mapping handles only `23505` → `ErrAlreadyAnswered` and `pgx.ErrNoRows` → `ErrNotFound`; anything else falls through raw to `game.RecordAnswer`'s default arm and `wa/inbound.go`'s degrade path, which replies with the generic Help text. This story is what introduces the `CHECK (stage IN ('mcq','exact'))` that can be violated, and `type Stage = string` is a true alias so nothing stops a new constant from compiling. When Story 3.5 adds `StageFuzzy` in Go before widening the CHECK, **every free-text answer insert fails** and is diagnosable only from a WARN log line. Story 3.5 is next in the sprint. [server/internal/store/answers.go:66-73]
+- [x] [Review][Patch] `TestRevealPropagatesCountUngradedAnswersError` under-asserts and misses the spec's own requirement — Task 4 specifies the error "propagates unwrapped (`errors.Is`, not string equality — 3.2's review precedent)", but the test only asserts `err != nil` and that it is neither `ErrGradingIncomplete` nor `ErrNotQuestionClosed`; it never asserts the error *is* the injected one, so any newly-introduced third sentinel passes. It also omits `revealCurrentQuestionCalls == 0`, so a refactor that swallowed the count error and proceeded to the write would stay green. [server/internal/game/engine_test.go:282-294]
+- [x] [Review][Defer] Every SQL artifact in this story has zero automated coverage [server/internal/game/engine_test.go, server/internal/httpapi/control_test.go] — deferred, matches the project's documented convention
+- [x] [Review][Defer] Bank-imported `accepted_answers` bypass `validateQuestion`'s trim [server/internal/store/queries/packages.sql:25-33] — deferred, pre-existing
+- [x] [Review][Defer] Rolling back 00011 while the 3.4 binary is live silently discards every inbound answer [server/migrations/00011_answer_grading.sql:16-20] — deferred, operational note
+- [x] [Review][Defer] No `web/`/`strings.he.ts`/`messages_he.go` changes in this story [spec Dev Notes] — deferred per the story's own request, revisit trigger Story 3.6
+
+Dismissed as noise (5, all from the deliberately-context-blind layer, each refuted against the real schema): `CorrectOption int32` nullable-scan risk and a "hand-edited generated file" claim (`correct_option` is `INTEGER NOT NULL DEFAULT 0` at `00003:28`, and `sqlc generate` re-ran byte-identical); `GradeExact` on empty/NULL `accepted_answers` (`NOT NULL DEFAULT '{}'` plus `questions_type_shape` requires `cardinality >= 1` for free_text, and the mcq branch never calls it); `GradeMCQ` on an out-of-range `correct_option` (`questions_type_shape` requires `BETWEEN 1 AND 4` for mcq); `type Stage = string` weakening type safety (explicit, documented spec decision mirroring `game.State` — the one real consequence is captured as the `23514` patch above); the answer key travelling in `GetOpenQuestionForPlayerRow` (verified not logged, not marshaled, and `snapshot.go` explicitly omits grade data at every state).
 
 ## Dev Notes
 
@@ -380,8 +398,51 @@ Go stdlib `testing`, co-located `_test.go`, stubs grown in place (`stubStore`, `
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5), via the bmad-dev-story workflow.
+
 ### Debug Log References
+
+- Confirmed story 3.3 was actually `done` (its own status flipped and committed at `8d41b4b`, ahead of this story's stale `baseline_commit` reference) before starting — re-read the current on-disk shape of `game/answers.go`, `store/answers.go`, `queries/answers.sql`, `engine.go`, and `game/engine_test.go`/`answers_test.go` per the story's own "re-verify, don't trust the snapshot" warning. Two things had drifted from this story's Task 3/4 code snippets (both from 3.3's own review-fix round, which post-dated when this story was written): `GetOpenQuestionForPlayer` already carried `is_open`/`already_answered` columns and no longer filtered on `g.state`, and `game.RecordAnswer`/`AnswerResult` already carried a post-write broadcast `Snapshot`. Implemented Tasks 3/4 against the *actual* current shape (merging in `correct_option`/`accepted_answers` alongside the existing columns, threading `is_correct`/`stage` through the existing broadcast-snapshot call) rather than the story's literal snippets.
+- `sqlc generate` diff after Task 1/3: non-empty as expected — `internal/store/gen/answers.sql.go` (+`CountUngradedAnswersForCurrentQuestion`, extended `GetOpenQuestionForPlayerRow`/`RecordAnswerParams`), `games.sql.go` (`RevealCurrentQuestion` gains the grading-guard `FROM questions`/`NOT EXISTS`), `models.go` (+`Answer.IsCorrect`/`Answer.Stage`). One deviation from the story's prediction: `sqlc.arg(is_correct)`/`sqlc.arg(stage)` generated `pgtype.Bool`/`pgtype.Text` on `gen.RecordAnswerParams` (nullable, inferred from the target columns), not the plain `bool`/`string` the story's Dev Notes predicted for an `sqlc.arg`-bound parameter — kept `store.RecordAnswerParams`'s own wrapper type as plain `bool`/`string` (matching the story's Task 4 call-site expectation) and convert to `pgtype.Bool{Valid: true}`/`pgtype.Text{Valid: true}` inside `store.RecordAnswer`. Re-ran `sqlc generate` after removing the E2E harness to confirm the diff is idempotent (identical output, no drift).
+- `gofmt -l .` (LF-normalized per the documented Windows/`core.autocrlf=true` workaround, 2.2 onward): copied every changed `.go` file into a temp dir with `tr -d '\r'` and ran `gofmt -l` against the copies — zero real violations; the raw `gofmt -l .` run on the working tree flags ~14 files (this story's `control_test.go` included) but all are the known CRLF false-positive, confirmed by the LF-normalized re-check.
+- `go1.26.5 vet ./...` and `go1.26.5 test ./...` clean on every run (zero regressions across auth/config/game/grading/httpapi/store/wa/ws).
+- Local Go E2E (`cmd/e2escratch`, deleted after use, same pattern as 2.1–3.3): booted the real `httpapi.NewRouter` + `wa` inbound webhook path in-process (`httptest.NewServer`) against the local dev Postgres (Docker), `wa.Client` pointed at a local fake Meta endpoint. Organizer provisioned in-process via `store.UpsertOrganizer` (no `cmd/provision` subprocess). Full sequence: create game + 1 MCQ (correctOption=2) + 1 Free-Text question (`accepted_answers: ["ירושלים","ירושלים עיר הקודש"]`) → open-lobby → JOIN 3 players (A, B, C) via signed inbound webhook → `POST /start` → A replies `"2"` (correct), B replies `"1"` (incorrect) → direct DB query confirmed `is_correct=true,stage='mcq'` for A and `is_correct=false,stage='mcq'` for B → `close-question` → `reveal` returned 200 (vacuously-satisfied gate, both already graded) → `next-question` → A replies `"ירושלים"` (exact), B replies `"ירושלים עיר הקודש "` with a trailing space (still matches — 3.3's intake trim), C replies `"ירו"` (no match) → DB query confirmed `is_correct=true` for A/B and `is_correct=false,stage='exact'` for C (graded, not left NULL) → `close-question` → `reveal` returned 200 again (all three graded, including C's miss). 14 outbound WhatsApp sends captured by the fake Meta endpoint across the run (3 join-welcomes + 3 Q1 dispatches + 2 Q1 acks + 3 Q2 dispatches + 3 Q2 acks), all assertions passed on the run used for this record. No unit- or integration-observable path exists in this story to force the `GRADING_INCOMPLETE` 409 (grading is fully synchronous end-to-end) — per the story's own Task 5 note, that branch is verified only by `TestRevealReturnsErrGradingIncompleteWhenOutstandingGradesExist`/`TestRevealPropagatesCountUngradedAnswersError` (mocked `stubStore`), not contrived in the E2E. Scratch organizer deleted afterward (cascades to sessions/games/questions/participants/answers via `ON DELETE CASCADE`); harness deleted afterward (never committed).
 
 ### Completion Notes List
 
+- All 5 tasks and their subtasks complete; all 3 ACs satisfied and verified end-to-end (unit tests + local E2E against real Postgres).
+- AC-1 (MCQ mechanical grading, never disclosed before Reveal): `grading.GradeMCQ` compares the normalized response digit against `correct_option`; the verdict rides in the same `RecordAnswer` INSERT as the answer row (no separate UPDATE, so SM-4's persist-before-ack guarantee is untouched). `AnswerResult`/`AnswerOutcome` gained no correctness field — confirmed by inspection, the ack stays `"התקבל ✓"` regardless of grade.
+- AC-2 (Free-Text Exact stage): `grading.GradeExact` does literal string equality against every `accepted_answers` entry, no normalization beyond the caller's trim — a miss is graded `stage='exact', is_correct=false`, never left ungraded (Dev Notes' explicit design decision: leaving it NULL would permanently block Reveal until Stories 3.5/3.6 ship). Verified by both the unit test (`TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse`) and the E2E's C-misses-Q2 scenario.
+- AC-3 (Reveal gates on `stage IS NOT NULL`): `Engine.Reveal` now pre-checks `CountUngradedAnswersForCurrentQuestion` before attempting the write; `outstanding > 0` returns the new `ErrGradingIncomplete` sentinel (mapped to 409 `GRADING_INCOMPLETE` in `httpapi/errors.go`) without ever calling `RevealCurrentQuestion` — confirmed via `TestRevealReturnsErrGradingIncompleteWhenOutstandingGradesExist`'s `revealCurrentQuestionCalls == 0` assertion. `RevealCurrentQuestion`'s own `NOT EXISTS (... a.stage IS NULL)` guard is the write-time race-safety net, unreachable in practice while grading stays synchronous (matches the story's own framing — this gate is structural scaffolding for Story 3.6, not observably reachable end-to-end yet).
+- The story's own prerequisite section ("3.3 is not finished") was stale by the time this story started — 3.3 had since reached `done` (committed at `8d41b4b`) with two review-fix changes (`is_open`/`already_answered` on `GetOpenQuestionForPlayer`, broadcast `Snapshot` on `AnswerResult`) that postdated this story's Dev Notes snippets. Re-verified the actual on-disk shape before writing any code, per the story's own instruction to do so; implemented Tasks 3/4 against that actual shape rather than the (now outdated) literal snippets — see Debug Log for the two specific deviations.
+- `sqlc`'s inferred Go types for `sqlc.arg(is_correct)`/`sqlc.arg(stage)` came out as `pgtype.Bool`/`pgtype.Text` (nullable), not the plain `bool`/`string` the story's Dev Notes predicted — the DB columns are nullable (forward-compatible with Story 3.6's async AI stage) and sqlc's inference followed the column, not the `arg`/`narg` distinction the story described. `store.RecordAnswerParams` (the wrapper `game`/callers use) keeps the plain `bool`/`string` shape the story's Task 4 snippet expects; `store.RecordAnswer` does the `pgtype` conversion at the boundary.
+- Dev Notes' scoping decision ("why no `web/`/`strings.he.ts`/`messages_he.go` changes") stands as written — this story is entirely server-internal (grade computation + storage + one new REST error code); no organizer-visible affordance exists for `GRADING_INCOMPLETE` to surface today. Flagging for code review per the story's own note, in case a `deferred-work.md` entry (revisit trigger: Story 3.6) is warranted.
+- No real-phone WhatsApp verification performed or needed — matches 3.2/3.3's precedent; the local E2E exercises the real webhook → inbound-routing → engine → grading → store path end-to-end against a fake Meta endpoint.
+
 ### File List
+
+**New:**
+- `server/migrations/00011_answer_grading.sql`
+- `server/internal/grading/pipeline.go`
+- `server/internal/grading/pipeline_test.go`
+
+**Modified:**
+- `server/internal/store/queries/answers.sql` (`GetOpenQuestionForPlayer` +`correct_option`/`accepted_answers`, `RecordAnswer` +`is_correct`/`stage`, +`CountUngradedAnswersForCurrentQuestion`)
+- `server/internal/store/queries/games.sql` (`RevealCurrentQuestion` gains the grading-completeness guard)
+- `server/internal/store/gen/answers.sql.go` (sqlc-generated)
+- `server/internal/store/gen/games.sql.go` (sqlc-generated)
+- `server/internal/store/gen/models.go` (sqlc-generated — `Answer.IsCorrect`/`Answer.Stage`)
+- `server/internal/store/answers.go` (`RecordAnswerParams` +`IsCorrect bool`/`Stage string`, +`CountUngradedAnswersForCurrentQuestion`)
+- `server/internal/game/answers.go` (`RecordAnswer` grades inline before persisting)
+- `server/internal/game/answers_test.go` (new grading assertions on the existing `RecordAnswer` test suite)
+- `server/internal/game/engine.go` (+1 `Store` interface method, +`ErrGradingIncomplete`, `Reveal` gains the pre-check)
+- `server/internal/game/engine_test.go` (`stubStore` extension, new `Reveal` grading-gate tests)
+- `server/internal/httpapi/errors.go` (+1 `writeStoreError` case for `GRADING_INCOMPLETE`)
+- `server/internal/httpapi/control_test.go` (+1 focused `Reveal` grading-incomplete test)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (story marked in-progress → review)
+
+## Change Log
+
+- 2026-08-05: Code review (3 layers; Acceptance Auditor aborted on a session limit, its dimension covered inline). 3 decisions resolved, 6 patches applied, 5 items deferred, 5 dismissed. Patches: 00011 gains a backfill for pre-3.4 answer rows (validated against real Postgres — grades MCQ/Exact correctly and skips already-graded rows); `GetOpenQuestionForPlayer` orders by `q.created_at` so grading reads the same question row players were shown; new `game.stripFormatMarks` strips category-Cf marks (RLM/LRM/BOM) before parsing and grading, with two new tests confirmed to fail without it; `Reveal`'s race comment corrected (it described an unreachable race and omitted the new join condition); Postgres 23514 mapped in `store.RecordAnswer`; `TestRevealPropagatesCountUngradedAnswersError` strengthened to `errors.Is` the injected sentinel plus a call-count assertion. All gates re-run green (gofmt LF-normalized, vet, `go test ./... -count=1`, `sqlc generate` idempotent). Status: done.
+
+- 2026-08-05: Dev implementation complete (all 5 tasks, all 3 ACs) — new `grading` package (`GradeMCQ`/`GradeExact`, pure functions), `answers.is_correct`/`stage` columns + guarded `RecordAnswer`/`RevealCurrentQuestion` queries, `game.Engine.RecordAnswer` grades inline before persisting, `Reveal` gains a synchronous grading-completeness pre-check (`ErrGradingIncomplete` → 409 `GRADING_INCOMPLETE`). Re-verified 3.3's actual (post-review-fix) on-disk shape before implementing, since this story's own Dev Notes snippets predated two of 3.3's review fixes — see Debug Log for the two concrete deviations reconciled. All Go quality gates green (gofmt LF-normalized, vet, test, `sqlc generate` diff idempotent). Local Go E2E against a real webhook path + fake Meta endpoint passed clean (MCQ correct/incorrect and Free-Text match/miss all graded and persisted correctly; both Reveals succeeded once grading completed). Status: review.
