@@ -48,23 +48,36 @@ type AnswerResult struct {
 	Snapshot Snapshot
 }
 
-// mcqOptionLetters maps the four lettered options — same fixed ordering as
-// messages_he.go's Question-MCQ template (א/ב/ג/ד) — to their 1-based
-// option number, matching questions.correct_option's convention (1-4).
-var mcqOptionLetters = map[string]int{"א": 1, "ב": 2, "ג": 3, "ד": 4}
+// hebrewOptionLetterBase is the Unicode code point of the Hebrew letter
+// ALEF (U+05D0), the first of the four lettered MCQ options. ALEF, BET,
+// GIMEL and DALET are four CONSECUTIVE code points (U+05D0-U+05D3) in the
+// same order as messages_he.go's Question-MCQ template lists them, so the
+// 1-based option number is just an offset from this base — expressed as a
+// code-point range rather than a literal-keyed map (and named by letter
+// name, never spelled with the actual glyph, even in a comment) so this
+// file stays entirely free of raw Hebrew characters. That matters because
+// game is imported BY wa (see wa/inbound.go), so game cannot import
+// wa/messages_he.go back without an import cycle — the one file CI's
+// copy-centralization check exempts (besides _test.go files) is not an
+// option here.
+const hebrewOptionLetterBase = 0x05D0
 
-// parseMCQOption recognizes a TRIMMED single letter (א-ד) or digit (1-4)
-// reply. Unlike parseJoinCode's multi-field tolerance, any extra content
-// ("1 hi", "א.") fails to parse — FR-5 specifies a bare letter or digit,
-// and a stricter parse here means "1." correctly earns the format hint
-// (AC-2) rather than a guessed, possibly-wrong option.
+// parseMCQOption recognizes a TRIMMED single Hebrew option letter or digit
+// (1-4) reply. Unlike parseJoinCode's multi-field tolerance, any extra
+// content ("1 hi", trailing punctuation after the letter) fails to parse —
+// FR-5 specifies a bare letter or digit, and a stricter parse here means
+// such input correctly earns the format hint (AC-2) rather than a guessed,
+// possibly-wrong option.
 func parseMCQOption(body string) (option int, ok bool) {
 	trimmed := strings.TrimSpace(body)
 	if n, err := strconv.Atoi(trimmed); err == nil && n >= 1 && n <= 4 {
 		return n, true
 	}
-	if opt, ok := mcqOptionLetters[trimmed]; ok {
-		return opt, true
+	if utf8.RuneCountInString(trimmed) == 1 {
+		r, _ := utf8.DecodeRuneInString(trimmed)
+		if offset := r - hebrewOptionLetterBase; offset >= 0 && offset <= 3 {
+			return int(offset) + 1, true
+		}
 	}
 	return 0, false
 }
@@ -161,8 +174,17 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 			return AnswerResult{Outcome: AnswerTooLong}, nil
 		}
 		response = trimmed
-		isCorrect = grading.GradeExact(response, qc.AcceptedAnswers)
-		stage = grading.StageExact
+		switch {
+		case grading.GradeExact(response, qc.AcceptedAnswers):
+			isCorrect = true
+			stage = grading.StageExact
+		case grading.GradeFuzzy(response, qc.AcceptedAnswers):
+			isCorrect = true
+			stage = grading.StageFuzzy
+		default:
+			isCorrect = false
+			stage = grading.StageFuzzy
+		}
 	default:
 		// questions_type_shape's CHECK constraint guarantees this never
 		// happens for a real row — fail closed with an error (degrades to

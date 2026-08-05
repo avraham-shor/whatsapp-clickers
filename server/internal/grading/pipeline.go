@@ -1,6 +1,6 @@
 // Package grading implements FR-15/FR-16's answer-correctness pipeline —
 // MCQ mechanical grading and Free-Text's Exact → Fuzzy → AI stages
-// (Fuzzy lands in Story 3.5, AI in Story 3.6; this story is Exact only).
+// (Fuzzy landed in Story 3.5; AI lands in Story 3.6).
 // Pure functions, no store/DB dependency — game calls in, store persists
 // the verdict game hands back (architecture: game imports grading).
 package grading
@@ -18,7 +18,8 @@ type Stage = string
 const (
 	StageMCQ   Stage = "mcq"
 	StageExact Stage = "exact"
-	// StageFuzzy and StageAI join this list in Stories 3.5/3.6.
+	StageFuzzy Stage = "fuzzy"
+	// StageAI joins this list in Story 3.6.
 )
 
 // GradeMCQ reports whether response (a normalized "1".."4" digit
