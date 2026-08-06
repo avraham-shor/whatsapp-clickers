@@ -28,7 +28,13 @@ type Config struct {
 	// a value the room reads off a projector/dashboard.
 	WhatsAppDisplayNumber string
 	AnthropicAPIKey       string
-	SessionSecret         string
+	// AnthropicAPIBaseURL overrides the Anthropic API base URL. OPTIONAL and
+	// empty in production, where the SDK's pinned default is what we want;
+	// exists so an E2E harness can point the server at a local fake
+	// Anthropic endpoint (Story 3.6), same pattern as WhatsAppAPIBaseURL.
+	// Neither required nor placeholder-validated.
+	AnthropicAPIBaseURL string
+	SessionSecret       string
 }
 
 const defaultPort = "8080"
@@ -78,7 +84,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 		return nil, err
 	}
 
-	if err := validateWhatsAppValues(cfg); err != nil {
+	if err := validatePlaceholderValues(cfg); err != nil {
 		return nil, err
 	}
 
@@ -91,6 +97,9 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 	// every other value so a CRLF-authored .env cannot smuggle a \r into a URL.
 	if baseURL, ok := lookup("WHATSAPP_API_BASE_URL"); ok {
 		cfg.WhatsAppAPIBaseURL = strings.TrimSpace(baseURL)
+	}
+	if baseURL, ok := lookup("ANTHROPIC_API_BASE_URL"); ok {
+		cfg.AnthropicAPIBaseURL = strings.TrimSpace(baseURL)
 	}
 	return cfg, nil
 }
@@ -108,13 +117,21 @@ func validateSessionSecret(secret string) error {
 	return nil
 }
 
-// validateWhatsAppValues rejects the documented .env.example placeholders
-// for the four Meta WhatsApp Cloud API variables, collecting every offender
-// into one error (fix-all-in-one-pass, mirrors validateSessionSecret).
-// ANTHROPIC_API_KEY is deliberately NOT validated here: it stays the
-// documented "dummy" placeholder until Epic 3 (story 3.6) consumes it, so
-// validating it now would fail-fast boots for zero safety gain.
-func validateWhatsAppValues(cfg *Config) error {
+// validatePlaceholderValues rejects the documented .env.example
+// placeholders for every live external credential, collecting every
+// offender into one error (fix-all-in-one-pass, mirrors
+// validateSessionSecret).
+//
+// ANTHROPIC_API_KEY joined the list at story 3.6, which is the story that
+// finally consumes it — the exemption this function used to document ("it
+// stays the documented placeholder until Epic 3 story 3.6 consumes it, so
+// validating it now would fail-fast boots for zero safety gain") expired
+// there. With a placeholder key the server boots happily and every
+// free_text answer that reaches the AI Semantic stage 401s and fails closed
+// to *incorrect*, distinguishable from a working system only by per-answer
+// WARN lines. Fail-fast is strictly the kinder failure. Code review
+// finding, story 3.6.
+func validatePlaceholderValues(cfg *Config) error {
 	candidates := []struct {
 		name  string
 		value string
@@ -124,6 +141,7 @@ func validateWhatsAppValues(cfg *Config) error {
 		{"WHATSAPP_APP_SECRET", cfg.WhatsAppAppSecret},
 		{"WHATSAPP_VERIFY_TOKEN", cfg.WhatsAppVerifyToken},
 		{"WHATSAPP_DISPLAY_NUMBER", cfg.WhatsAppDisplayNumber},
+		{"ANTHROPIC_API_KEY", cfg.AnthropicAPIKey},
 	}
 
 	// Case-insensitive: this is a last-resort safety net, and "Dummy" or

@@ -19,6 +19,7 @@ type Answer struct {
 	Seq           pgtype.Int8
 	IsCorrect     pgtype.Bool
 	Stage         pgtype.Text
+	PointsAwarded pgtype.Int4
 }
 
 type Game struct {

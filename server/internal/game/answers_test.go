@@ -313,11 +313,11 @@ func TestRecordAnswerMCQCorrectSetsIsCorrectTrue(t *testing.T) {
 	if result.Outcome != AnswerAccepted {
 		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
 	}
-	if !st.recordAnswerArg.IsCorrect {
+	if st.recordAnswerArg.IsCorrect == nil || !*st.recordAnswerArg.IsCorrect {
 		t.Error("IsCorrect = false, want true")
 	}
-	if st.recordAnswerArg.Stage != grading.StageMCQ {
-		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageMCQ)
+	if st.recordAnswerArg.Stage == nil || *st.recordAnswerArg.Stage != grading.StageMCQ {
+		t.Errorf("Stage = %v, want %q", st.recordAnswerArg.Stage, grading.StageMCQ)
 	}
 }
 
@@ -333,11 +333,11 @@ func TestRecordAnswerMCQIncorrectSetsIsCorrectFalse(t *testing.T) {
 	if result.Outcome != AnswerAccepted {
 		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
 	}
-	if st.recordAnswerArg.IsCorrect {
+	if st.recordAnswerArg.IsCorrect == nil || *st.recordAnswerArg.IsCorrect {
 		t.Error("IsCorrect = true, want false")
 	}
-	if st.recordAnswerArg.Stage != grading.StageMCQ {
-		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageMCQ)
+	if st.recordAnswerArg.Stage == nil || *st.recordAnswerArg.Stage != grading.StageMCQ {
+		t.Errorf("Stage = %v, want %q", st.recordAnswerArg.Stage, grading.StageMCQ)
 	}
 }
 
@@ -353,20 +353,22 @@ func TestRecordAnswerFreeTextExactMatchSetsIsCorrectTrue(t *testing.T) {
 	if result.Outcome != AnswerAccepted {
 		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
 	}
-	if !st.recordAnswerArg.IsCorrect {
+	if st.recordAnswerArg.IsCorrect == nil || !*st.recordAnswerArg.IsCorrect {
 		t.Error("IsCorrect = false, want true")
 	}
-	if st.recordAnswerArg.Stage != grading.StageExact {
-		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageExact)
+	if st.recordAnswerArg.Stage == nil || *st.recordAnswerArg.Stage != grading.StageExact {
+		t.Errorf("Stage = %v, want %q", st.recordAnswerArg.Stage, grading.StageExact)
 	}
 }
 
-// TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse covers this story's
-// design decision (Dev Notes): a response missing both Exact and Fuzzy is
-// graded false at stage = fuzzy — the last stage that ran, not left
-// pending — Reveal must not stay permanently blocked waiting for a stage
-// that doesn't exist yet (AI, story 3.6).
-func TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse(t *testing.T) {
+// TestRecordAnswerFreeTextNoMatchLeavesGradePending covers this story's
+// (3.6) design: a response missing both Exact and Fuzzy is no longer
+// graded false on the spot (3.5's behavior) — it is persisted pending
+// (is_correct/stage both nil) and graded asynchronously by the AI Semantic
+// stage. This stubStore has no WithAIGrader, so e.aiGrader is nil and the
+// async branch never fires — the assertion is purely about what
+// RecordAnswer passes to the store at the pending moment.
+func TestRecordAnswerFreeTextNoMatchLeavesGradePending(t *testing.T) {
 	st := answerStub("free_text")
 	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
 	e := NewEngine(st, "+972 50-000-0000", nil)
@@ -378,11 +380,11 @@ func TestRecordAnswerFreeTextNoMatchSetsIsCorrectFalse(t *testing.T) {
 	if result.Outcome != AnswerAccepted {
 		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
 	}
-	if st.recordAnswerArg.IsCorrect {
-		t.Error("IsCorrect = true, want false")
+	if st.recordAnswerArg.IsCorrect != nil {
+		t.Errorf("IsCorrect = %v, want nil (pending AI grading)", *st.recordAnswerArg.IsCorrect)
 	}
-	if st.recordAnswerArg.Stage != grading.StageFuzzy {
-		t.Errorf("Stage = %q, want %q (graded, not left ungraded)", st.recordAnswerArg.Stage, grading.StageFuzzy)
+	if st.recordAnswerArg.Stage != nil {
+		t.Errorf("Stage = %v, want nil (pending AI grading)", *st.recordAnswerArg.Stage)
 	}
 }
 
@@ -401,11 +403,223 @@ func TestRecordAnswerFreeTextFuzzyMatchSetsIsCorrectTrue(t *testing.T) {
 	if result.Outcome != AnswerAccepted {
 		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
 	}
-	if !st.recordAnswerArg.IsCorrect {
+	if st.recordAnswerArg.IsCorrect == nil || !*st.recordAnswerArg.IsCorrect {
 		t.Error("IsCorrect = false, want true")
 	}
-	if st.recordAnswerArg.Stage != grading.StageFuzzy {
-		t.Errorf("Stage = %q, want %q", st.recordAnswerArg.Stage, grading.StageFuzzy)
+	if st.recordAnswerArg.Stage == nil || *st.recordAnswerArg.Stage != grading.StageFuzzy {
+		t.Errorf("Stage = %v, want %q", st.recordAnswerArg.Stage, grading.StageFuzzy)
+	}
+}
+
+// --- AI Semantic stage, async pending→graded path (story 3.6) ---
+
+// fakeAIGrader is a test-local grading.AIGrader — GradeAI answers with
+// whatever this test configured, no network I/O. Real GradeAI/network
+// behavior is exercised only at the E2E tier (Task 10 of story 3.6).
+//
+// It records every argument it was handed. Ignoring them (its original
+// shape) left the whole prompt-input wiring untested: passing
+// qc.QuestionType instead of qc.QuestionText, or dropping acceptedAnswers,
+// kept the suite green, which mattered because carrying question_text
+// through GetOpenQuestionForPlayer is the entire point of story 3.6's Task
+// 4. Code review finding, story 3.6.
+type fakeAIGrader struct {
+	correct bool
+	err     error
+
+	calls int
+	arg   struct {
+		question        string
+		acceptedAnswers []string
+		response        string
+	}
+}
+
+func (f *fakeAIGrader) GradeAI(ctx context.Context, question string, acceptedAnswers []string, response string) (bool, error) {
+	f.calls++
+	f.arg.question = question
+	f.arg.acceptedAnswers = acceptedAnswers
+	f.arg.response = response
+	return f.correct, f.err
+}
+
+// testQuestionText is the question wording aiPathStub puts on the row, so a
+// test can assert it reached the grader's prompt inputs.
+const testQuestionText = "בירת ישראל?"
+
+// aiPathStub builds an answerStub wired to run AI grading synchronously:
+// WithAsyncRunner makes e.runAsync execute inline (no goroutine, no
+// time.Sleep polling — deterministic per this codebase's testing
+// standard), and WithAIGrader supplies grader as the AI Semantic stage.
+func aiPathStub(grader grading.AIGrader) (*stubStore, *Engine) {
+	st := answerStub("free_text")
+	st.getOpenQuestionForPlayerResult.QuestionText = testQuestionText
+	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
+	e := NewEngine(st, "+972 50-000-0000", nil,
+		WithAIGrader(grader),
+		WithAsyncRunner(func(f func()) { f() }),
+	)
+	return st, e
+}
+
+// TestRecordAnswerAIGraderReceivesQuestionContext covers story 3.6's Task 4
+// (GetOpenQuestionForPlayer carrying q.text) and epic AC-1's "the prompt
+// carries the Question text, the Accepted Answers, and the participant's
+// response" at the seam where those three are handed to the grader — the
+// only place in non-generated code that reads QuestionText at all.
+func TestRecordAnswerAIGraderReceivesQuestionContext(t *testing.T) {
+	grader := &fakeAIGrader{correct: true}
+	st, e := aiPathStub(grader)
+
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if grader.calls != 1 {
+		t.Fatalf("GradeAI called %d times, want 1", grader.calls)
+	}
+	if grader.arg.question != testQuestionText {
+		t.Errorf("question = %q, want %q", grader.arg.question, testQuestionText)
+	}
+	if len(grader.arg.acceptedAnswers) != 1 || grader.arg.acceptedAnswers[0] != "ירושלים" {
+		t.Errorf("acceptedAnswers = %v, want [ירושלים]", grader.arg.acceptedAnswers)
+	}
+	if grader.arg.response != "תל אביב" {
+		t.Errorf("response = %q, want %q", grader.arg.response, "תל אביב")
+	}
+	// The verdict must be persisted against the row RecordAnswer just
+	// created, not some other answer's id.
+	if st.updateAnswerGradeArg.answerID != "a1" {
+		t.Errorf("UpdateAnswerGrade answerID = %q, want %q", st.updateAnswerGradeArg.answerID, "a1")
+	}
+}
+
+// TestRecordAnswerNoAIGraderLeavesRowPending pins the misconfiguration
+// path: without WithAIGrader nothing grades the pending row, and the engine
+// must not pretend otherwise by writing a grade of its own — the orphan
+// sweep is what resolves it.
+func TestRecordAnswerNoAIGraderLeavesRowPending(t *testing.T) {
+	st := answerStub("free_text")
+	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if st.updateAnswerGradeCalls != 0 {
+		t.Errorf("UpdateAnswerGrade called %d times, want 0", st.updateAnswerGradeCalls)
+	}
+}
+
+// TestRecordAnswerAIPersistRetriesThenGivesUp covers the bounded retry on
+// the verdict write: it is the only writer that clears a pending row
+// in-process, and Reveal is gated on that column, so a transient error must
+// not strand the question on the first attempt (epic AC-2, "never left
+// ungraded"). Code review finding, story 3.6.
+func TestRecordAnswerAIPersistRetriesThenGivesUp(t *testing.T) {
+	st, e := aiPathStub(&fakeAIGrader{correct: true})
+	st.updateAnswerGradeErr = errors.New("connection reset")
+
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil (the ack never depends on grading)", err)
+	}
+	if st.updateAnswerGradeCalls != gradePersistAttempts {
+		t.Errorf("UpdateAnswerGrade called %d times, want %d", st.updateAnswerGradeCalls, gradePersistAttempts)
+	}
+}
+
+// TestRecordAnswerAIGraderPanicIsContainedAndFailsClosed pins the panic
+// guard: the grading goroutine is spawned from the webhook's own goroutine,
+// where neither wa/webhook.go's recover nor net/http's per-connection
+// recover can reach it, and the repo has no panic-recovery middleware — so
+// without this, one SDK panic takes the whole server down mid-game. Code
+// review finding, story 3.6.
+func TestRecordAnswerAIGraderPanicIsContainedAndFailsClosed(t *testing.T) {
+	st, e := aiPathStub(panicAIGrader{})
+
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if st.updateAnswerGradeCalls != 1 {
+		t.Fatalf("UpdateAnswerGrade called %d times, want 1 (fail-closed after the panic)", st.updateAnswerGradeCalls)
+	}
+	if st.updateAnswerGradeArg.isCorrect {
+		t.Error("isCorrect = true, want false (fail-closed)")
+	}
+	if st.updateAnswerGradeArg.stage != grading.StageFuzzy {
+		t.Errorf("stage = %q, want %q", st.updateAnswerGradeArg.stage, grading.StageFuzzy)
+	}
+}
+
+// panicAIGrader stands in for a panic anywhere below GradeAI — the SDK, its
+// HTTP transport, JSON decoding.
+type panicAIGrader struct{}
+
+func (panicAIGrader) GradeAI(context.Context, string, []string, string) (bool, error) {
+	panic("boom")
+}
+
+func TestRecordAnswerFreeTextAIMatchSetsIsCorrectTrue(t *testing.T) {
+	st, e := aiPathStub(&fakeAIGrader{correct: true})
+
+	result, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if result.Outcome != AnswerAccepted {
+		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
+	}
+	if st.updateAnswerGradeCalls != 1 {
+		t.Fatalf("UpdateAnswerGrade called %d times, want 1", st.updateAnswerGradeCalls)
+	}
+	if !st.updateAnswerGradeArg.isCorrect {
+		t.Error("isCorrect = false, want true")
+	}
+	if st.updateAnswerGradeArg.stage != grading.StageAI {
+		t.Errorf("stage = %q, want %q", st.updateAnswerGradeArg.stage, grading.StageAI)
+	}
+}
+
+// TestRecordAnswerFreeTextAIMissSetsIsCorrectFalseStageAI covers epic AC-4:
+// a completed AI call that genuinely judges the response wrong still
+// records stage='ai' — not silently downgraded to 'fuzzy', which is
+// reserved for a call that did not complete (AC-2).
+func TestRecordAnswerFreeTextAIMissSetsIsCorrectFalseStageAI(t *testing.T) {
+	st, e := aiPathStub(&fakeAIGrader{correct: false})
+
+	_, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if st.updateAnswerGradeCalls != 1 {
+		t.Fatalf("UpdateAnswerGrade called %d times, want 1", st.updateAnswerGradeCalls)
+	}
+	if st.updateAnswerGradeArg.isCorrect {
+		t.Error("isCorrect = true, want false")
+	}
+	if st.updateAnswerGradeArg.stage != grading.StageAI {
+		t.Errorf("stage = %q, want %q (a completed miss is still AI-graded)", st.updateAnswerGradeArg.stage, grading.StageAI)
+	}
+}
+
+// TestRecordAnswerFreeTextAIErrorFailsClosedToFuzzy covers epic AC-2: an
+// AIGrader error (standing in for a timeout — a real context.DeadlineExceeded
+// from AnthropicAIGrader.GradeAI is exercised only at the E2E tier) fails
+// closed to a two-stage grade, indistinguishable from a Fuzzy miss.
+func TestRecordAnswerFreeTextAIErrorFailsClosedToFuzzy(t *testing.T) {
+	st, e := aiPathStub(&fakeAIGrader{err: errors.New("ai unavailable")})
+
+	_, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	if err != nil {
+		t.Fatalf("RecordAnswer() err = %v, want nil", err)
+	}
+	if st.updateAnswerGradeCalls != 1 {
+		t.Fatalf("UpdateAnswerGrade called %d times, want 1", st.updateAnswerGradeCalls)
+	}
+	if st.updateAnswerGradeArg.isCorrect {
+		t.Error("isCorrect = true, want false (fail-closed)")
+	}
+	if st.updateAnswerGradeArg.stage != grading.StageFuzzy {
+		t.Errorf("stage = %q, want %q (fail-closed to the last completed stage)", st.updateAnswerGradeArg.stage, grading.StageFuzzy)
 	}
 }
 
@@ -434,7 +648,7 @@ func TestRecordAnswerFreeTextIgnoresInvisibleFormatMarks(t *testing.T) {
 	if result.Outcome != AnswerAccepted {
 		t.Errorf("Outcome = %q, want AnswerAccepted", result.Outcome)
 	}
-	if !st.recordAnswerArg.IsCorrect {
+	if st.recordAnswerArg.IsCorrect == nil || !*st.recordAnswerArg.IsCorrect {
 		t.Error("IsCorrect = false, want true (invisible marks must not defeat an exact match)")
 	}
 	// The persisted response must be the stripped form too — a stored
@@ -460,7 +674,7 @@ func TestRecordAnswerMCQIgnoresInvisibleFormatMarks(t *testing.T) {
 	if result.Outcome != AnswerAccepted {
 		t.Fatalf("Outcome = %q, want AnswerAccepted (marks must not earn a format hint)", result.Outcome)
 	}
-	if !st.recordAnswerArg.IsCorrect {
+	if st.recordAnswerArg.IsCorrect == nil || !*st.recordAnswerArg.IsCorrect {
 		t.Error("IsCorrect = false, want true")
 	}
 }

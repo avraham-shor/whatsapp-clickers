@@ -60,6 +60,10 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
   const anyConflict =
     (action.error instanceof ApiError && action.error.status === 409) ||
     (stop.error instanceof ApiError && stop.error.status === 409)
+  // GRADING_INCOMPLETE is itself a 409 (httpapi/errors.go), so it must be
+  // checked before the generic anyConflict fallback below or it would
+  // match that first and show the less specific message.
+  const gradingIncomplete = action.error instanceof ApiError && action.error.code === 'GRADING_INCOMPLETE'
 
   // A plain ref, not action.isPending: React Query doesn't flip isPending
   // synchronously inside mutate(), so a second call arriving before the next
@@ -142,7 +146,11 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
 
       {(action.isError || stop.isError) && (
         <p role="alert" className="text-sm text-error">
-          {anyConflict ? strings.live.actionConflict : strings.live.actionError}
+          {gradingIncomplete
+            ? strings.live.gradingIncomplete
+            : anyConflict
+              ? strings.live.actionConflict
+              : strings.live.actionError}
         </p>
       )}
 

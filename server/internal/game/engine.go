@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
+	"github.com/avraham-shor/whatsapp-clickers/internal/grading"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store/gen"
 )
@@ -59,13 +61,16 @@ type Store interface {
 	ListQuestionsByGame(ctx context.Context, gameID, organizerID string) ([]gen.Question, error)
 	StartGameFirstQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	CloseCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error)
-	RevealCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error)
+	ListAnswersForScoring(ctx context.Context, gameID string, position int32) ([]store.AnswerForScoring, error)
+	RevealCurrentQuestionAndAwardPoints(ctx context.Context, gameID, organizerID string, points []store.AnswerPointsParams) (gen.Game, error)
+	GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error)
 	OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error)
 	FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error)
 	RecordAnswer(ctx context.Context, arg store.RecordAnswerParams) (gen.Answer, error)
 	CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error)
 	CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error)
+	UpdateAnswerGrade(ctx context.Context, answerID string, isCorrect bool, stage string) error
 }
 
 // Engine is the single write path for games.state (Enforcement Guidelines:
@@ -76,16 +81,104 @@ type Engine struct {
 	store          Store
 	platformNumber string
 	logger         *slog.Logger
+	aiGrader       grading.AIGrader
+	runAsync       func(func())
+	// gradeSem bounds how many AI Semantic stage calls run at once, and
+	// gradeWG tracks them so a shutdown can wait for their verdicts to land
+	// instead of abandoning pending rows. See WithMaxConcurrentAIGrades and
+	// WaitForGrading.
+	gradeSem chan struct{}
+	gradeWG  sync.WaitGroup
+}
+
+// EngineOption configures optional Engine dependencies.
+type EngineOption func(*Engine)
+
+// WithAIGrader sets the AI Semantic stage's grader (Story 3.6). Callers
+// that omit it get a nil aiGrader: a free_text answer that misses both
+// Exact and Fuzzy is then persisted pending and logged at WARN, and only
+// the orphan sweep will ever resolve it — a misconfiguration, not a mode.
+// Production wiring (main.go) always supplies one.
+func WithAIGrader(g grading.AIGrader) EngineOption {
+	return func(e *Engine) { e.aiGrader = g }
+}
+
+// WithMaxConcurrentAIGrades caps how many AI Semantic stage calls are in
+// flight at once (Story 3.6). n <= 0 is ignored.
+//
+// Unbounded fan-out was the original shape: one goroutine, one Anthropic
+// call and one deadline-free pool acquisition per double-miss answer. A
+// large room on a hard free-text question would then fire a hundred
+// simultaneous Opus calls — rate-limit rejections eating the 5s per-call
+// budget in backoff until every one of them fails closed to *incorrect* —
+// while a hundred waiters starved a pgxpool sized max(4, numCPU), stalling
+// the webhook handlers still recording answers. Bounded like every other
+// outbound-I/O path here (wa.Dispatcher's worker pool). Code review
+// finding, story 3.6.
+func WithMaxConcurrentAIGrades(n int) EngineOption {
+	return func(e *Engine) {
+		if n > 0 {
+			e.gradeSem = make(chan struct{}, n)
+		}
+	}
+}
+
+// WithAsyncRunner overrides how RecordAnswer launches AI grading —
+// production defaults to a real goroutine; tests substitute a
+// synchronous runner so the pending→graded transition is deterministic
+// (no time.Sleep polling, matching this codebase's "deterministic tests
+// only" testing standard — see deferred-work.md's 2.1 rate-limiter entry
+// for why that standard exists).
+func WithAsyncRunner(run func(func())) EngineOption {
+	return func(e *Engine) { e.runAsync = run }
 }
 
 // NewEngine builds an Engine. platformNumber is the WhatsApp number shown
 // on the lobby page (WHATSAPP_DISPLAY_NUMBER). logger may be nil, in which
-// case slog.Default() is used.
-func NewEngine(st Store, platformNumber string, logger *slog.Logger) *Engine {
+// case slog.Default() is used. opts is a variadic functional-options tail
+// (Story 3.6's WithAIGrader/WithAsyncRunner) rather than new positional
+// parameters — this keeps every existing 3-arg NewEngine(...) call
+// compiling unchanged (production and every pre-3.6 test).
+func NewEngine(st Store, platformNumber string, logger *slog.Logger, opts ...EngineOption) *Engine {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Engine{store: st, platformNumber: platformNumber, logger: logger}
+	e := &Engine{
+		store:          st,
+		platformNumber: platformNumber,
+		logger:         logger,
+		runAsync:       func(f func()) { go f() },
+		gradeSem:       make(chan struct{}, DefaultMaxConcurrentAIGrades),
+	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// WaitForGrading blocks until every in-flight AI grading goroutine has
+// persisted its verdict, or until ctx is done — whichever comes first. It
+// reports whether grading drained cleanly.
+//
+// Called during shutdown, after the HTTP server has stopped (so no new
+// answers can arrive) and before the pool closes. Without it, SIGTERM
+// abandons every in-flight verdict: those rows stay stage IS NULL, and the
+// orphan sweep that would eventually rescue them runs in a *different*
+// process which, in a zero-downtime redeploy, has already booted and swept
+// before this one dies. Draining here is what keeps that the rare case
+// rather than the normal one. Code review finding, story 3.6.
+func (e *Engine) WaitForGrading(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.gradeWG.Wait()
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // OpenLobby transitions gameID from draft to lobby and returns the
@@ -174,6 +267,8 @@ func (e *Engine) CloseQuestion(ctx context.Context, gameID, organizerID string) 
 // one that lost a concurrent transition race) is ErrNotQuestionClosed; a
 // missing/foreign game is store.ErrNotFound; a question_closed game with
 // outstanding ungraded answers is ErrGradingIncomplete (FR-16 epic AC-3).
+// It also computes and persists Speed Bonus scoring for the revealed
+// question (FR-17, story 3.7).
 func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
 	g, err := e.store.GetGameForOrganizer(ctx, gameID, organizerID)
 	if err != nil {
@@ -189,31 +284,50 @@ func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapsh
 	if outstanding > 0 {
 		return Snapshot{}, ErrGradingIncomplete
 	}
-	g, err = e.store.RevealCurrentQuestion(ctx, gameID, organizerID)
+
+	answers, err := e.store.ListAnswersForScoring(ctx, gameID, g.CurrentQuestionPosition)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	cfg := ScoringConfig{
+		PointsPerCorrect: g.PointsPerCorrect,
+		SpeedBonusFirst:  g.SpeedBonusFirst,
+		SpeedBonusSecond: g.SpeedBonusSecond,
+		SpeedBonusThird:  g.SpeedBonusThird,
+	}
+	points := AwardPoints(answers, cfg)
+
+	g, err = e.store.RevealCurrentQuestionAndAwardPoints(ctx, gameID, organizerID, points)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			// The write-time guard failed after a successful read. Unlike
-			// every other transition in this file, this guard is no longer
-			// single-condition — it can miss because a concurrent
-			// transition moved the game off question_closed, because no
-			// questions row matches current_question_position (the
-			// UPDATE ... FROM join is inner), or because an answer for the
-			// current question is ungraded. All three collapse to
-			// ErrNotQuestionClosed, so the reported cause can be wrong.
+			// Race-loss reinterpretation, same as every other transition
+			// here. Only the initial RevealCurrentQuestion UPDATE inside
+			// the transaction can return zero rows this way — the batch
+			// points write is an :exec whose targets were resolved moments
+			// ago by this same request, so an error from it propagates
+			// here as a genuine, un-reinterpreted failure instead.
 			//
-			// Note the count above cannot go stale underneath us: an
-			// answer can only be inserted while the game is question_open
+			// But WHICH condition that UPDATE missed on is still ambiguous,
+			// and this remains a known gap rather than a solved problem.
+			// Unlike every other transition in this file, its guard is not
+			// single-condition (queries/games.sql): it can miss because a
+			// concurrent transition moved the game off question_closed,
+			// because no questions row matches current_question_position
+			// (the UPDATE ... FROM join is inner), or because an answer for
+			// the current question is ungraded (the NOT EXISTS clause). All
+			// three collapse to ErrNotQuestionClosed, so the cause reported
+			// to the operator can be wrong.
+			//
+			// The count above cannot go stale underneath us: an answer can
+			// only be inserted while the game is question_open
 			// (RecordAnswer's own guard), and Reveal runs only from
-			// question_closed, so there is no window for a fresh ungraded
-			// answer to appear between the count and this write. The
-			// collapse is tolerable today because the join condition is
-			// unreachable in practice — question_closed is only arrived at
-			// via StartGameFirstQuestion/OpenNextQuestion, both of which
-			// require the matching questions row to exist, and every
-			// question mutation is state='draft'-guarded. Revisit when
-			// Story 3.6 makes the grading condition genuinely reachable:
-			// at that point these deserve distinct errors rather than one
-			// message that can send an operator after the wrong problem.
+			// question_closed. Story 3.6 made the grading condition
+			// genuinely reachable (async AI verdicts), which is when the
+			// original version of this comment said these deserve distinct
+			// errors rather than one message that can send an operator
+			// after the wrong problem — that is still true and still not
+			// done. Deferred at 3.7's code review; revisit whenever this
+			// path next changes.
 			return Snapshot{}, ErrNotQuestionClosed
 		}
 		return Snapshot{}, err
@@ -388,6 +502,12 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 		}
 	}
 
+	scores, err := e.store.GetLeaderboard(ctx, g.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	leaderboard := RankLeaderboard(scores)
+
 	return Snapshot{
 		GameID:           g.ID,
 		State:            g.State,
@@ -397,6 +517,7 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 		Participants:     summaries,
 		QuestionCount:    len(questions),
 		CurrentQuestion:  current,
+		Leaderboard:      leaderboard,
 	}, nil
 }
 
@@ -411,5 +532,6 @@ func emptySnapshot(platformNumber string, g gen.Game) Snapshot {
 		PlatformNumber:   platformNumber,
 		ParticipantCount: 0,
 		Participants:     []ParticipantSummary{},
+		Leaderboard:      []LeaderboardEntry{},
 	}
 }

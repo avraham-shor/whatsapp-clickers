@@ -158,6 +158,7 @@ export const strings = {
     // surfaces) — the WS broadcast already carries the current state; this
     // banner self-clears once it arrives.
     actionConflict: 'מצב המשחק השתנה בינתיים. הלוח יתעדכן אוטומטית.',
+    gradingIncomplete: 'עדיין בודקים חלק מהתשובות. נסו שוב בעוד רגע.',
     startGameNoQuestions: 'הוסיפו לפחות שאלה אחת כדי להתחיל את המשחק.',
   },
 } as const

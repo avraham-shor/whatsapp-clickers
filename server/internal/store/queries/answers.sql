@@ -41,9 +41,14 @@
 -- now that this SELECT also carries the grading inputs, an unordered pick
 -- could grade a participant against the answer key of a question they
 -- were never shown. Code review finding, story 3.4.
+-- q.text AS question_text (Story 3.6) carries the actual question wording
+-- through to the AI Semantic stage's prompt (epic AC-1) — the only other
+-- field this query was missing for that stage's inputs, since
+-- correct_option/accepted_answers already made the trip in story 3.4.
 -- name: GetOpenQuestionForPlayer :one
 SELECT g.id AS game_id, q.id AS question_id, q.type AS question_type,
-       q.correct_option, q.accepted_answers, p.id AS participant_id,
+       q.text AS question_text, q.correct_option, q.accepted_answers,
+       p.id AS participant_id,
        COALESCE(g.state = 'question_open' AND now() <= g.answer_cutoff_at, false)::boolean AS is_open,
        EXISTS (
            SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.participant_id = p.id
@@ -103,3 +108,147 @@ SELECT count(*) FROM answers a
 JOIN questions q ON q.id = a.question_id
 JOIN games g ON g.id = q.game_id
 WHERE g.id = sqlc.arg(game_id) AND q.position = g.current_question_position AND a.stage IS NULL;
+
+-- Persists an async grading verdict once the AI stage resolves (Story
+-- 3.6) — the first UPDATE against the answers table in this codebase
+-- (00011's comment anticipated exactly this).
+--
+-- The stage IS NULL predicate is a write-time guard, not decoration:
+-- FailCloseOrphanedAnswers below is a second writer of the same rows, so
+-- "nothing else ever mutates a graded row" is false. Once a row is graded
+-- — by this UPDATE, or by the sweep fail-closing it — that grade is
+-- final; a verdict landing afterwards is a no-op rather than a silent
+-- rewrite of a value the Organizer may already have revealed to the room
+-- (and that story 3.7's scoring will read). Same "guard at write time
+-- instead of trusting an earlier read" discipline as RecordAnswer's
+-- INSERT. Code review finding, story 3.6.
+-- name: UpdateAnswerGrade :exec
+UPDATE answers SET is_correct = sqlc.arg(is_correct), stage = sqlc.arg(stage)
+WHERE id = sqlc.arg(id) AND stage IS NULL;
+
+-- Self-heals rows orphaned by a process restart/crash while their AI
+-- grading goroutine was still in flight (deferred-work.md, story 3.4
+-- review, "Story 3.6... two-phase NOT NULL migration, or a force-reveal
+-- escape hatch" — this is the lighter of those two options). An
+-- in-memory goroutine does not survive a process restart, so a crash
+-- between RecordAnswer's pending INSERT and the async UPDATE leaves a
+-- stage IS NULL row that nothing will ever grade again, permanently
+-- blocking Reveal for that question (NFR-2 "an acknowledged answer is
+-- never lost" / "degraded modes must be silent and self-healing").
+--
+-- received_at < older_than is what makes this safe to run while games are
+-- live, and it is required, not optional. The original version was
+-- unscoped and ran only at boot, on the reasoning that "a row belonging to
+-- a goroutine this same process just launched cannot exist yet at boot
+-- time". That holds for one process and fails for the deployment this
+-- project actually uses: store/migrate.go documents that "zero-downtime
+-- redeploys briefly run two instances, and both boot through this path",
+-- so the booting instance's sweep would fail-close rows the *outgoing*
+-- instance is still legitimately AI-grading for a currently-open question
+-- — un-blocking Reveal early and announcing a wrong verdict. The caller
+-- passes a cutoff comfortably beyond any legitimate in-flight grade
+-- (game.OrphanAnswerAge), so only genuine orphans match.
+--
+-- Correspondingly the caller runs this on a ticker for the process's
+-- lifetime, not just at boot: rows abandoned by an instance that dies
+-- *after* the surviving instance booted are created after the only sweep a
+-- boot-time-only design would ever run, and would stay pending forever.
+-- Code review finding, story 3.6.
+-- name: FailCloseOrphanedAnswers :one
+WITH updated AS (
+    UPDATE answers SET is_correct = false, stage = 'fuzzy'
+    WHERE stage IS NULL AND received_at < sqlc.arg(older_than)
+    RETURNING 1
+)
+SELECT count(*) FROM updated;
+
+-- Answers to the Question at (game_id, position), already graded —
+-- read by game.Engine.Reveal AFTER its CountUngradedAnswersForCurrentQuestion
+-- pre-check confirms zero pending rows, and BEFORE the guarded
+-- RevealCurrentQuestionAndAwardPoints transaction (games.sql). Safe to
+-- read outside that transaction: RecordAnswer's own write-time guard
+-- (state = 'question_open') means no new answer can appear for this
+-- question once Reveal's caller has already observed
+-- state = 'question_closed', and nothing mutates is_correct/stage
+-- between the zero-pending check and this read (no other actor grades
+-- an already-graded row). is_correct is read via `.Bool` without a
+-- `.Valid` check downstream for the same reason — the zero-pending
+-- precondition guarantees every row here is graded.
+--
+-- The ORDER BY q.created_at / LIMIT 1 subquery resolves (game_id,
+-- position) to exactly ONE question, matching GetOpenQuestionForPlayer
+-- above and buildSnapshot's ORDER BY q.position, q.created_at. Without
+-- it a plain join would return the union of every question sharing that
+-- position, and 00003 deliberately declines UNIQUE (game_id, position)
+-- (see GetOpenQuestionForPlayer's comment: reorder rewrites 1..N inside
+-- a transaction, and CreateQuestion's max(position)+1 has no backstop
+-- against concurrent inserts). Unioned answers would spread the three
+-- speed bonuses across two questions AND stamp points_awarded on rows
+-- belonging to a question that was never revealed, breaking the
+-- "non-NULL means revealed" invariant GetLeaderboard depends on. Code
+-- review finding, story 3.7.
+-- name: ListAnswersForScoring :many
+SELECT a.id, a.is_correct, a.received_at, a.seq
+FROM answers a
+WHERE a.question_id = (
+    SELECT q.id FROM questions q
+    WHERE q.game_id = sqlc.arg(game_id) AND q.position = sqlc.arg(position)
+    ORDER BY q.created_at
+    LIMIT 1
+);
+
+-- Persists every answer's computed point award for one revealed question
+-- in a SINGLE statement (story 3.7).
+--
+-- Set-based via unnest rather than one UPDATE per answer: this runs
+-- inside RevealCurrentQuestionAndAwardPoints' transaction, itself inside
+-- handleReveal's fixed 5s request budget. A per-row loop made the reveal
+-- O(answers) sequential round-trips while holding the transaction open,
+-- so at the 500-participant scale epics.md asks the design not to
+-- preclude, the deadline could expire mid-loop — and because that
+-- expiry is deterministic rather than transient, every retry would fail
+-- identically and wedge the game at question_closed with Reveal the only
+-- route out. Code review finding, story 3.7.
+--
+-- points_awarded IS NULL is a write-time guard, exactly mirroring
+-- UpdateAnswerGrade's stage IS NULL and for the same reason: a score
+-- already persisted for this answer has, by construction, already been
+-- revealed to the room, so a second write is a silent rewrite of a
+-- published value rather than a correction. Making the write idempotent
+-- also means any future re-reveal/correction path no-ops here instead of
+-- reassigning speed-bonus slots. Code review finding, story 3.7.
+-- (The two single-argument unnests in a subquery SELECT list, rather
+-- than the tidier two-argument `unnest(a, b) AS v(id, points)`, are
+-- purely to stay inside what sqlc v1.31's catalog can analyze — it does
+-- not know the multi-argument form. Postgres evaluates multiple
+-- set-returning functions in a SELECT list in lockstep, and the two
+-- arrays are built from the same slice, so the pairing is exact.)
+-- name: UpdateAnswerPointsBatch :exec
+UPDATE answers a
+SET points_awarded = v.points
+FROM (
+    SELECT unnest(sqlc.arg(answer_ids)::uuid[]) AS id,
+           unnest(sqlc.arg(points)::int[]) AS points
+) AS v
+WHERE a.id = v.id AND a.points_awarded IS NULL;
+
+-- Cumulative per-participant score (FR-17/18) — sums points_awarded
+-- across every revealed Question's answers; points_awarded IS NOT NULL
+-- is exactly "this answer's Question has been revealed" (see migration
+-- 00014). SUM(integer) is bigint in Postgres; ::int narrows back to
+-- int32 to match points_per_correct's own column type. LEFT JOIN so a
+-- participant with zero answers (hasn't played yet, or every answer
+-- they gave is still un-revealed) still gets a 0-score row instead of
+-- being absent from the leaderboard. role = 'player' excludes
+-- Spectators explicitly — they never answer, but this leaderboard is
+-- scoped intentionally rather than inheriting the role-blind roster gap
+-- tracked elsewhere (deferred-work.md, 2.5 review). ORDER BY mirrors
+-- ListParticipants' own tie-break exactly, so RankLeaderboard's stable
+-- sort breaks score ties by join order.
+-- name: GetLeaderboard :many
+SELECT p.id AS participant_id, p.display_name, COALESCE(SUM(a.points_awarded), 0)::int AS score
+FROM participants p
+LEFT JOIN answers a ON a.participant_id = p.id AND a.points_awarded IS NOT NULL
+WHERE p.game_id = sqlc.arg(game_id) AND p.role = 'player'
+GROUP BY p.id, p.display_name
+ORDER BY p.joined_at ASC, p.id ASC;

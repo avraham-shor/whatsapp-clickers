@@ -249,13 +249,24 @@ func TestLoadDisplayNumberRealValueCarriedThrough(t *testing.T) {
 	}
 }
 
-func TestLoadAnthropicKeyDummyStillBoots(t *testing.T) {
-	env := fullEnv()
-	env["ANTHROPIC_API_KEY"] = "dummy"
+// TestLoadRejectsPlaceholderAnthropicKey inverts what this test asserted
+// through story 3.5 ("dummy still boots"). Story 3.6 is the consumer that
+// exemption was waiting for: with a placeholder key the server boots, every
+// free_text answer reaching the AI Semantic stage 401s, and each one is
+// fail-closed to *incorrect* — a silently wrong game rather than a refused
+// boot. Code review finding, story 3.6.
+func TestLoadRejectsPlaceholderAnthropicKey(t *testing.T) {
+	for _, placeholder := range []string{"dummy", "Dummy", "change-me", "CHANGE-ME-please"} {
+		env := fullEnv()
+		env["ANTHROPIC_API_KEY"] = placeholder
 
-	_, err := load(lookupFromMap(env))
-	if err != nil {
-		t.Fatalf("load() rejected dummy ANTHROPIC_API_KEY, want it to still boot (Epic 3 concern): %v", err)
+		_, err := load(lookupFromMap(env))
+		if err == nil {
+			t.Fatalf("load() accepted placeholder ANTHROPIC_API_KEY %q, want an error", placeholder)
+		}
+		if !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+			t.Errorf("error %q does not name ANTHROPIC_API_KEY", err.Error())
+		}
 	}
 }
 
