@@ -30,10 +30,11 @@ The production artifact is a **single Go binary** that embeds the built SPA
 
 ### Setup
 
-1. `cp server/.env.example server/.env` and fill values. `DATABASE_URL` and
-   the four `WHATSAPP_*` values must be real (see "Meta WhatsApp Business
-   setup" below — the server refuses to boot on placeholder WhatsApp values
-   since Story 2.1); `ANTHROPIC_API_KEY` can stay `dummy` until Epic 3. Load
+1. `cp server/.env.example server/.env` and fill values. `DATABASE_URL`, the
+   four `WHATSAPP_*` values and `ANTHROPIC_API_KEY` must all be real (see
+   "Meta WhatsApp Business setup" below — the server refuses to boot on
+   placeholder WhatsApp values since Story 2.1, and on a placeholder
+   Anthropic key since Story 3.6, which is what first consumes it). Load
    the file into your shell before running the server (e.g.
    `set -a; . server/.env; set +a` in Git Bash).
 2. `cd web && npm install`
@@ -117,8 +118,8 @@ in-memory WebSocket hub assumes a single instance — do not enable autoscaling)
 4. On the service, set environment variables (see `server/.env.example`):
    `DATABASE_URL` (reference the Railway Postgres variable), the four
    `WHATSAPP_*` values (real test-number values — see "Meta WhatsApp
-   Business setup" above), `ANTHROPIC_API_KEY` (dummy is still fine — Epic 3
-   is the first consumer), and `SESSION_SECRET` (long random string).
+   Business setup" above), `ANTHROPIC_API_KEY` (a real key — enforced since
+   Story 3.6), and `SESSION_SECRET` (long random string).
    Railway injects `PORT` itself.
 
    ⚠️ **`SESSION_SECRET` is enforced since Story 1.2**: the server refuses to

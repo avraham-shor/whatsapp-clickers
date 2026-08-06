@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
+	"github.com/avraham-shor/whatsapp-clickers/internal/grading"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store/gen"
 )
@@ -66,6 +68,7 @@ type Store interface {
 	RecordAnswer(ctx context.Context, arg store.RecordAnswerParams) (gen.Answer, error)
 	CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error)
 	CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error)
+	UpdateAnswerGrade(ctx context.Context, answerID string, isCorrect bool, stage string) error
 }
 
 // Engine is the single write path for games.state (Enforcement Guidelines:
@@ -76,16 +79,104 @@ type Engine struct {
 	store          Store
 	platformNumber string
 	logger         *slog.Logger
+	aiGrader       grading.AIGrader
+	runAsync       func(func())
+	// gradeSem bounds how many AI Semantic stage calls run at once, and
+	// gradeWG tracks them so a shutdown can wait for their verdicts to land
+	// instead of abandoning pending rows. See WithMaxConcurrentAIGrades and
+	// WaitForGrading.
+	gradeSem chan struct{}
+	gradeWG  sync.WaitGroup
+}
+
+// EngineOption configures optional Engine dependencies.
+type EngineOption func(*Engine)
+
+// WithAIGrader sets the AI Semantic stage's grader (Story 3.6). Callers
+// that omit it get a nil aiGrader: a free_text answer that misses both
+// Exact and Fuzzy is then persisted pending and logged at WARN, and only
+// the orphan sweep will ever resolve it — a misconfiguration, not a mode.
+// Production wiring (main.go) always supplies one.
+func WithAIGrader(g grading.AIGrader) EngineOption {
+	return func(e *Engine) { e.aiGrader = g }
+}
+
+// WithMaxConcurrentAIGrades caps how many AI Semantic stage calls are in
+// flight at once (Story 3.6). n <= 0 is ignored.
+//
+// Unbounded fan-out was the original shape: one goroutine, one Anthropic
+// call and one deadline-free pool acquisition per double-miss answer. A
+// large room on a hard free-text question would then fire a hundred
+// simultaneous Opus calls — rate-limit rejections eating the 5s per-call
+// budget in backoff until every one of them fails closed to *incorrect* —
+// while a hundred waiters starved a pgxpool sized max(4, numCPU), stalling
+// the webhook handlers still recording answers. Bounded like every other
+// outbound-I/O path here (wa.Dispatcher's worker pool). Code review
+// finding, story 3.6.
+func WithMaxConcurrentAIGrades(n int) EngineOption {
+	return func(e *Engine) {
+		if n > 0 {
+			e.gradeSem = make(chan struct{}, n)
+		}
+	}
+}
+
+// WithAsyncRunner overrides how RecordAnswer launches AI grading —
+// production defaults to a real goroutine; tests substitute a
+// synchronous runner so the pending→graded transition is deterministic
+// (no time.Sleep polling, matching this codebase's "deterministic tests
+// only" testing standard — see deferred-work.md's 2.1 rate-limiter entry
+// for why that standard exists).
+func WithAsyncRunner(run func(func())) EngineOption {
+	return func(e *Engine) { e.runAsync = run }
 }
 
 // NewEngine builds an Engine. platformNumber is the WhatsApp number shown
 // on the lobby page (WHATSAPP_DISPLAY_NUMBER). logger may be nil, in which
-// case slog.Default() is used.
-func NewEngine(st Store, platformNumber string, logger *slog.Logger) *Engine {
+// case slog.Default() is used. opts is a variadic functional-options tail
+// (Story 3.6's WithAIGrader/WithAsyncRunner) rather than new positional
+// parameters — this keeps every existing 3-arg NewEngine(...) call
+// compiling unchanged (production and every pre-3.6 test).
+func NewEngine(st Store, platformNumber string, logger *slog.Logger, opts ...EngineOption) *Engine {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Engine{store: st, platformNumber: platformNumber, logger: logger}
+	e := &Engine{
+		store:          st,
+		platformNumber: platformNumber,
+		logger:         logger,
+		runAsync:       func(f func()) { go f() },
+		gradeSem:       make(chan struct{}, DefaultMaxConcurrentAIGrades),
+	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// WaitForGrading blocks until every in-flight AI grading goroutine has
+// persisted its verdict, or until ctx is done — whichever comes first. It
+// reports whether grading drained cleanly.
+//
+// Called during shutdown, after the HTTP server has stopped (so no new
+// answers can arrive) and before the pool closes. Without it, SIGTERM
+// abandons every in-flight verdict: those rows stay stage IS NULL, and the
+// orphan sweep that would eventually rescue them runs in a *different*
+// process which, in a zero-downtime redeploy, has already booted and swept
+// before this one dies. Draining here is what keeps that the rare case
+// rather than the normal one. Code review finding, story 3.6.
+func (e *Engine) WaitForGrading(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.gradeWG.Wait()
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // OpenLobby transitions gameID from draft to lobby and returns the

@@ -92,6 +92,14 @@ type stubStore struct {
 	countUngradedAnswersForCurrentQuestionResult int64
 	countUngradedAnswersForCurrentQuestionErr    error
 	countUngradedAnswersForCurrentQuestionCalls  int
+
+	updateAnswerGradeErr   error
+	updateAnswerGradeCalls int
+	updateAnswerGradeArg   struct {
+		answerID  string
+		isCorrect bool
+		stage     string
+	}
 }
 
 func (s *stubStore) GetGameForOrganizer(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
@@ -194,6 +202,14 @@ func (s *stubStore) CountAnswersByQuestion(ctx context.Context, questionID strin
 func (s *stubStore) CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error) {
 	s.countUngradedAnswersForCurrentQuestionCalls++
 	return s.countUngradedAnswersForCurrentQuestionResult, s.countUngradedAnswersForCurrentQuestionErr
+}
+
+func (s *stubStore) UpdateAnswerGrade(ctx context.Context, answerID string, isCorrect bool, stage string) error {
+	s.updateAnswerGradeCalls++
+	s.updateAnswerGradeArg.answerID = answerID
+	s.updateAnswerGradeArg.isCorrect = isCorrect
+	s.updateAnswerGradeArg.stage = stage
+	return s.updateAnswerGradeErr
 }
 
 func draftStub() *stubStore {

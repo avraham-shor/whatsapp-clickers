@@ -41,9 +41,14 @@
 -- now that this SELECT also carries the grading inputs, an unordered pick
 -- could grade a participant against the answer key of a question they
 -- were never shown. Code review finding, story 3.4.
+-- q.text AS question_text (Story 3.6) carries the actual question wording
+-- through to the AI Semantic stage's prompt (epic AC-1) — the only other
+-- field this query was missing for that stage's inputs, since
+-- correct_option/accepted_answers already made the trip in story 3.4.
 -- name: GetOpenQuestionForPlayer :one
 SELECT g.id AS game_id, q.id AS question_id, q.type AS question_type,
-       q.correct_option, q.accepted_answers, p.id AS participant_id,
+       q.text AS question_text, q.correct_option, q.accepted_answers,
+       p.id AS participant_id,
        COALESCE(g.state = 'question_open' AND now() <= g.answer_cutoff_at, false)::boolean AS is_open,
        EXISTS (
            SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.participant_id = p.id
@@ -103,3 +108,56 @@ SELECT count(*) FROM answers a
 JOIN questions q ON q.id = a.question_id
 JOIN games g ON g.id = q.game_id
 WHERE g.id = sqlc.arg(game_id) AND q.position = g.current_question_position AND a.stage IS NULL;
+
+-- Persists an async grading verdict once the AI stage resolves (Story
+-- 3.6) — the first UPDATE against the answers table in this codebase
+-- (00011's comment anticipated exactly this).
+--
+-- The stage IS NULL predicate is a write-time guard, not decoration:
+-- FailCloseOrphanedAnswers below is a second writer of the same rows, so
+-- "nothing else ever mutates a graded row" is false. Once a row is graded
+-- — by this UPDATE, or by the sweep fail-closing it — that grade is
+-- final; a verdict landing afterwards is a no-op rather than a silent
+-- rewrite of a value the Organizer may already have revealed to the room
+-- (and that story 3.7's scoring will read). Same "guard at write time
+-- instead of trusting an earlier read" discipline as RecordAnswer's
+-- INSERT. Code review finding, story 3.6.
+-- name: UpdateAnswerGrade :exec
+UPDATE answers SET is_correct = sqlc.arg(is_correct), stage = sqlc.arg(stage)
+WHERE id = sqlc.arg(id) AND stage IS NULL;
+
+-- Self-heals rows orphaned by a process restart/crash while their AI
+-- grading goroutine was still in flight (deferred-work.md, story 3.4
+-- review, "Story 3.6... two-phase NOT NULL migration, or a force-reveal
+-- escape hatch" — this is the lighter of those two options). An
+-- in-memory goroutine does not survive a process restart, so a crash
+-- between RecordAnswer's pending INSERT and the async UPDATE leaves a
+-- stage IS NULL row that nothing will ever grade again, permanently
+-- blocking Reveal for that question (NFR-2 "an acknowledged answer is
+-- never lost" / "degraded modes must be silent and self-healing").
+--
+-- received_at < older_than is what makes this safe to run while games are
+-- live, and it is required, not optional. The original version was
+-- unscoped and ran only at boot, on the reasoning that "a row belonging to
+-- a goroutine this same process just launched cannot exist yet at boot
+-- time". That holds for one process and fails for the deployment this
+-- project actually uses: store/migrate.go documents that "zero-downtime
+-- redeploys briefly run two instances, and both boot through this path",
+-- so the booting instance's sweep would fail-close rows the *outgoing*
+-- instance is still legitimately AI-grading for a currently-open question
+-- — un-blocking Reveal early and announcing a wrong verdict. The caller
+-- passes a cutoff comfortably beyond any legitimate in-flight grade
+-- (game.OrphanAnswerAge), so only genuine orphans match.
+--
+-- Correspondingly the caller runs this on a ticker for the process's
+-- lifetime, not just at boot: rows abandoned by an instance that dies
+-- *after* the surviving instance booted are created after the only sweep a
+-- boot-time-only design would ever run, and would stay pending forever.
+-- Code review finding, story 3.6.
+-- name: FailCloseOrphanedAnswers :one
+WITH updated AS (
+    UPDATE answers SET is_correct = false, stage = 'fuzzy'
+    WHERE stage IS NULL AND received_at < sqlc.arg(older_than)
+    RETURNING 1
+)
+SELECT count(*) FROM updated;

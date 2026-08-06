@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,41 @@ var ErrNoOpenQuestion = errors.New("game: no open question for participant")
 // maxFreeTextAnswerLength is FR-5's 200-character cap, counted in runes
 // (Hebrew text) — never len(string), which counts UTF-8 bytes.
 const maxFreeTextAnswerLength = 200
+
+// Bounds on one answer's asynchronous AI grading (Story 3.6).
+const (
+	// DefaultMaxConcurrentAIGrades caps simultaneous AI Semantic stage
+	// calls. Sized against the two resources a burst contends for — the
+	// Anthropic account's rate limit and a pgxpool of max(4, numCPU) — not
+	// against room size, which the queue absorbs instead. See
+	// WithMaxConcurrentAIGrades.
+	DefaultMaxConcurrentAIGrades = 8
+
+	// gradeAsyncTimeout bounds one answer's whole grading attempt: waiting
+	// for a slot, the AI call (which imposes its own ~5s deadline inside
+	// this), and persisting the verdict. Generous enough that a full room
+	// queued behind the concurrency cap still gets graded, finite so a
+	// wedged dependency cannot park a goroutine and a pool waiter for the
+	// rest of the process's life. Must stay well under OrphanAnswerAge, or
+	// the sweep would fail-close answers still legitimately in flight.
+	gradeAsyncTimeout = 90 * time.Second
+
+	// gradePersistAttempts / gradePersistBackoff retry the verdict write.
+	// This is the only writer that clears a pending row in-process, and
+	// Reveal is gated on that column, so a single transient pool error must
+	// not strand the question. Linear backoff: 100ms, then 200ms — short,
+	// because this rides out pool contention rather than an outage, and the
+	// orphan sweep is the backstop for anything longer-lived.
+	gradePersistAttempts = 3
+	gradePersistBackoff  = 100 * time.Millisecond
+
+	// OrphanAnswerAge is how old a still-ungraded answer must be before the
+	// orphan sweep may fail-close it. Comfortably beyond gradeAsyncTimeout
+	// so the sweep can never touch a grade another process is still working
+	// on — the property that makes the sweep safe to run on a ticker, and
+	// safe while a second instance is live during a zero-downtime redeploy.
+	OrphanAnswerAge = 5 * time.Minute
+)
 
 // AnswerOutcome distinguishes the reply RecordAnswer's caller must send.
 // Every value maps to exactly one messages_he.go template — see
@@ -157,8 +193,8 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 	body := stripFormatMarks(rawText)
 
 	var response string
-	var isCorrect bool
-	var stage grading.Stage
+	var isCorrectPtr *bool
+	var stagePtr *string
 	switch qc.QuestionType {
 	case "mcq":
 		option, ok := parseMCQOption(body)
@@ -166,8 +202,9 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 			return AnswerResult{Outcome: AnswerFormatHint}, nil
 		}
 		response = strconv.Itoa(option)
-		isCorrect = grading.GradeMCQ(response, int(qc.CorrectOption))
-		stage = grading.StageMCQ
+		ic := grading.GradeMCQ(response, int(qc.CorrectOption))
+		st := grading.StageMCQ
+		isCorrectPtr, stagePtr = &ic, &st
 	case "free_text":
 		trimmed := strings.TrimSpace(body)
 		if utf8.RuneCountInString(trimmed) > maxFreeTextAnswerLength {
@@ -176,14 +213,18 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 		response = trimmed
 		switch {
 		case grading.GradeExact(response, qc.AcceptedAnswers):
-			isCorrect = true
-			stage = grading.StageExact
+			ic := true
+			st := grading.StageExact
+			isCorrectPtr, stagePtr = &ic, &st
 		case grading.GradeFuzzy(response, qc.AcceptedAnswers):
-			isCorrect = true
-			stage = grading.StageFuzzy
+			ic := true
+			st := grading.StageFuzzy
+			isCorrectPtr, stagePtr = &ic, &st
 		default:
-			isCorrect = false
-			stage = grading.StageFuzzy
+			// Exact and Fuzzy both missed — leave both nil (pending AI).
+			// Graded asynchronously below, once RecordAnswer persists the
+			// pending row (Story 3.6, AC-5: never block the ack on the AI
+			// call's ~5s worst case).
 		}
 	default:
 		// questions_type_shape's CHECK constraint guarantees this never
@@ -193,17 +234,20 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 		return AnswerResult{}, fmt.Errorf("game: question %s has unrecognized type %q", qc.QuestionID, qc.QuestionType)
 	}
 
-	_, err = e.store.RecordAnswer(ctx, store.RecordAnswerParams{
+	answer, err := e.store.RecordAnswer(ctx, store.RecordAnswerParams{
 		GameID:        qc.GameID,
 		QuestionID:    qc.QuestionID,
 		ParticipantID: qc.ParticipantID,
 		Response:      response,
 		ReceivedAt:    receivedAt,
-		IsCorrect:     isCorrect,
-		Stage:         stage,
+		IsCorrect:     isCorrectPtr,
+		Stage:         stagePtr,
 	})
 	switch {
 	case err == nil:
+		if isCorrectPtr == nil {
+			e.launchAIGrading(ctx, answer.ID, qc.QuestionText, qc.AcceptedAnswers, response)
+		}
 		return AnswerResult{Outcome: AnswerAccepted, GameID: qc.GameID, Snapshot: e.snapshotAfterAnswer(ctx, qc.GameID)}, nil
 	case errors.Is(err, store.ErrAlreadyAnswered):
 		return AnswerResult{Outcome: AnswerAlreadyAnswered}, nil
@@ -216,6 +260,130 @@ func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receiv
 		return AnswerResult{Outcome: AnswerClosed}, nil
 	default:
 		return AnswerResult{}, err
+	}
+}
+
+// launchAIGrading starts the AI Semantic stage for one just-persisted
+// pending answer (Exact and Fuzzy both missed) and returns immediately. The
+// grading itself is NOT on RecordAnswer's synchronous request path (epic
+// AC-5: FR-5 "immediately acknowledges", NFR-2 "never block the game loop")
+// — that is why the pending row (is_correct=NULL, stage=NULL) exists at all.
+func (e *Engine) launchAIGrading(ctx context.Context, answerID, questionText string, acceptedAnswers []string, response string) {
+	if e.aiGrader == nil {
+		// Not a supported degraded mode: nothing else will ever grade this
+		// row, so Reveal for its question stays blocked until the orphan
+		// sweep fail-closes it. Reachable only from a caller that built the
+		// Engine without WithAIGrader (the 3-arg NewEngine form, kept
+		// compiling for ~65 pre-3.6 tests), so say so rather than failing
+		// silently. Code review finding, story 3.6.
+		e.logger.Warn("no AI grader configured; answer left pending for the orphan sweep", "answer_id", answerID)
+		return
+	}
+
+	// Detached from ctx's cancellation — the webhook request that triggered
+	// this must not abort grading for this participant, same reasoning as
+	// snapshotAfterAnswer — but bounded, for the same reason that one wraps
+	// its detached context in a timeout: an unbounded context would let a
+	// wedged DB park this goroutine and its pool waiter forever. GradeAI
+	// derives its own ~5s per-call deadline inside this budget; the rest
+	// covers waiting for a concurrency slot and persisting the verdict.
+	gradeCtx := context.WithoutCancel(ctx)
+	e.gradeWG.Add(1)
+	e.runAsync(func() {
+		defer e.gradeWG.Done()
+		ctx, cancel := context.WithTimeout(gradeCtx, gradeAsyncTimeout)
+		defer cancel()
+		defer e.recoverGrading(ctx, answerID)
+		e.gradeAIAsync(ctx, answerID, questionText, acceptedAnswers, response)
+	})
+}
+
+// recoverGrading keeps a panic anywhere in the grading goroutine — the
+// Anthropic SDK, its HTTP transport, JSON decoding — from taking the whole
+// process down with it. This goroutine is spawned from the webhook's own
+// goroutine, so neither wa/webhook.go's recover nor net/http's
+// per-connection recover can see a panic here, and the repo has no
+// panic-recovery middleware. Fail closed afterwards so the answer's
+// question can still be revealed. Code review finding, story 3.6.
+func (e *Engine) recoverGrading(ctx context.Context, answerID string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	e.logger.Error("panic in AI grading goroutine, failing the answer closed",
+		"answer_id", answerID, "panic", r, "stack", string(debug.Stack()))
+	e.persistGrade(ctx, answerID, false, grading.StageFuzzy)
+}
+
+// gradeAIAsync runs the AI Semantic stage for one pending answer and
+// persists the verdict once it resolves. ctx must already be detached from
+// the triggering request and carry its own deadline (launchAIGrading does
+// both).
+func (e *Engine) gradeAIAsync(ctx context.Context, answerID, questionText string, acceptedAnswers []string, response string) {
+	correct, err := e.gradeAI(ctx, questionText, acceptedAnswers, response)
+	stage := grading.StageAI
+	if err != nil {
+		// Fail-closed (epic AC-2, NFR-8/SM-C1): AI unavailable — grade by
+		// the first two stages only, i.e. exactly as a Fuzzy miss. AC-2
+		// requires the recorded stage in this line, not just the identity
+		// and the cause: it is the SM-C1 audit trail for how an answer that
+		// never reached the AI stage came to be graded.
+		correct = false
+		stage = grading.StageFuzzy
+		e.logger.Warn("AI grading degraded, falling back to two-stage grade",
+			"answer_id", answerID, "stage", string(stage), "error", err)
+	}
+	e.persistGrade(ctx, answerID, correct, stage)
+}
+
+// gradeAI takes one of the bounded AI-grading slots, then runs the stage.
+// Failing to get a slot before ctx expires is an "AI unavailable" error,
+// which the caller fails closed exactly like a timeout — the room's
+// Organizer waiting on Reveal is better served by a two-stage grade than by
+// a queue that outlives the game.
+func (e *Engine) gradeAI(ctx context.Context, questionText string, acceptedAnswers []string, response string) (bool, error) {
+	select {
+	case e.gradeSem <- struct{}{}:
+		defer func() { <-e.gradeSem }()
+	case <-ctx.Done():
+		return false, fmt.Errorf("game: no AI grading slot available before the deadline: %w", ctx.Err())
+	}
+	return e.aiGrader.GradeAI(ctx, questionText, acceptedAnswers, response)
+}
+
+// persistGrade writes one resolved verdict, retrying a bounded number of
+// times before giving up.
+//
+// The retry matters because this is the only writer that clears a pending
+// row during a process's lifetime, and Reveal is gated on exactly that
+// column: dropping a single transient pool error (the original behavior —
+// log once and return) stranded one row and therefore one question for the
+// rest of the process, contradicting epic AC-2's "never left ungraded". The
+// orphan sweep is the backstop when even the retries fail, which is why the
+// final log line says so. Code review finding, story 3.6.
+func (e *Engine) persistGrade(ctx context.Context, answerID string, correct bool, stage grading.Stage) {
+	var err error
+	for attempt := 1; attempt <= gradePersistAttempts; attempt++ {
+		if err = e.store.UpdateAnswerGrade(ctx, answerID, correct, string(stage)); err == nil {
+			return
+		}
+		if attempt == gradePersistAttempts || !sleepCtx(ctx, gradePersistBackoff*time.Duration(attempt)) {
+			break
+		}
+	}
+	e.logger.Error("failed to persist AI grading verdict, leaving it to the orphan sweep",
+		"answer_id", answerID, "attempts", gradePersistAttempts, "error", err)
+}
+
+// sleepCtx waits for d, reporting false if ctx finished first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

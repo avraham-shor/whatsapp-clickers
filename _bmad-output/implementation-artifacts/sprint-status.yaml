@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-07-10
-last_updated: 2026-08-05
+last_updated: 2026-08-06
 
 project: whatsapp-clickers
 project_key: NOKEY
@@ -68,8 +68,8 @@ development_status:
   3-3-answer-intake-with-immediate-acknowledgment: done
   3-4-grading-pipeline-mcq-and-exact-match: done
   3-5-hebrew-fuzzy-matching: done
-  3-6-ai-semantic-validation-fail-closed: ready-for-dev
-  3-7-scoring-with-speed-bonuses: backlog
+  3-6-ai-semantic-validation-fail-closed: done
+  3-7-scoring-with-speed-bonuses: ready-for-dev
   3-8-personal-results-after-reveal: backlog
   3-9-final-results-for-everyone: backlog
   3-10-post-game-summary-on-the-dashboard: backlog

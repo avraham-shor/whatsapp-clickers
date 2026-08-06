@@ -16,6 +16,7 @@ import (
 	"github.com/avraham-shor/whatsapp-clickers/internal/auth"
 	"github.com/avraham-shor/whatsapp-clickers/internal/config"
 	"github.com/avraham-shor/whatsapp-clickers/internal/game"
+	"github.com/avraham-shor/whatsapp-clickers/internal/grading"
 	"github.com/avraham-shor/whatsapp-clickers/internal/httpapi"
 	"github.com/avraham-shor/whatsapp-clickers/internal/store"
 	"github.com/avraham-shor/whatsapp-clickers/internal/wa"
@@ -39,7 +40,40 @@ const (
 	// service to at least that worst case (30 leaves margin). See
 	// .env.example for the ops note.
 	dispatcherStopGrace = 2 * time.Second
+	// gradingDrainTimeout bounds waiting for in-flight AI grading verdicts
+	// to land after the HTTP server has stopped. Sized just past one AI
+	// call's ~5s per-call timeout so a verdict already on the wire is
+	// persisted rather than abandoned to the orphan sweep; anything queued
+	// behind the concurrency cap is left to that sweep instead of holding
+	// the shutdown open. Runs concurrently with the dispatcher drain, so it
+	// does not extend the worst case beyond httpShutdownTimeout + it.
+	gradingDrainTimeout = 8 * time.Second
+	// orphanSweepInterval is how often the pending-answer recovery sweep
+	// runs after boot. Bounds how long an orphan can block Reveal to roughly
+	// game.OrphanAnswerAge plus this.
+	orphanSweepInterval = time.Minute
+	// orphanSweepTimeout bounds one sweep. Deliberately its own budget and
+	// non-fatal: an opportunistic self-healing UPDATE must never be able to
+	// block or crash-loop a boot, which sharing the migration deadline and
+	// returning its error made possible. Code review finding, story 3.6.
+	orphanSweepTimeout = 15 * time.Second
 )
+
+// sweepOrphanedAnswers fail-closes answer rows left ungraded past
+// game.OrphanAnswerAge — a crashed or replaced process's abandoned AI
+// grading, or a verdict that could never be persisted. Best-effort by
+// design: a failure is logged and the next tick tries again.
+func sweepOrphanedAnswers(ctx context.Context, st *store.Store, logger *slog.Logger) {
+	sweepCtx, cancel := context.WithTimeout(ctx, orphanSweepTimeout)
+	defer cancel()
+	recovered, err := st.FailCloseOrphanedAnswers(sweepCtx, time.Now().Add(-game.OrphanAnswerAge))
+	switch {
+	case err != nil && ctx.Err() == nil:
+		logger.Warn("orphaned-answer sweep failed, will retry", "error", err)
+	case recovered > 0:
+		logger.Warn("fail-closed orphaned pending-AI answers", "count", recovered)
+	}
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -84,6 +118,13 @@ func run(logger *slog.Logger) error {
 	logger.Info("migrations applied", "count", applied)
 
 	st := store.New(pool)
+
+	// Orphan recovery (Story 3.6): fail-closes any answer row a crashed or
+	// replaced process left permanently stage IS NULL, which would otherwise
+	// block Reveal for that question forever. Once at boot, then on a ticker
+	// for the process's lifetime — see sweepOrphanedAnswers.
+	sweepOrphanedAnswers(ctx, st, logger)
+
 	authSvc := auth.NewService(st, cfg.SessionSecret)
 
 	var clientOpts []wa.ClientOption
@@ -95,6 +136,41 @@ func run(logger *slog.Logger) error {
 	}
 	waClient := wa.NewClient(cfg.WhatsAppAccessToken, cfg.WhatsAppPhoneNumberID, clientOpts...)
 	dispatcher := wa.NewDispatcher(waClient, logger)
+
+	aiGrader := grading.NewAnthropicAIGrader(cfg.AnthropicAPIKey, cfg.AnthropicAPIBaseURL)
+	if cfg.AnthropicAPIBaseURL != "" {
+		logger.Info("Anthropic API base URL overridden", "base_url", cfg.AnthropicAPIBaseURL)
+	}
+
+	// The sweep runs for the process's lifetime, not only at boot. A
+	// boot-only sweep structurally cannot see the rows it exists for during
+	// a zero-downtime redeploy: the new instance boots (and sweeps) first,
+	// then the old one dies and abandons its in-flight grades — those rows
+	// are created after the only sweep that would ever run. Its own context,
+	// so a SIGTERM stops it. Code review finding, story 3.6.
+	sweepCtx, stopSweeper := context.WithCancel(ctx)
+	sweeperDone := make(chan struct{})
+	go func() {
+		defer close(sweeperDone)
+		ticker := time.NewTicker(orphanSweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-sweepCtx.Done():
+				return
+			case <-ticker.C:
+				sweepOrphanedAnswers(sweepCtx, st, logger)
+			}
+		}
+	}()
+	// Its own cancel rather than relying on ctx: run also exits on a
+	// listener error, where the signal context is still live. Registered
+	// before pool.Close's defer runs (LIFO), so the sweeper is never mid-query
+	// against a closed pool.
+	defer func() {
+		stopSweeper()
+		<-sweeperDone
+	}()
 
 	// The dispatcher runs on its own context, NOT the signal context: on
 	// SIGTERM, srv.Shutdown keeps serving in-flight webhook requests for up to
@@ -113,8 +189,11 @@ func run(logger *slog.Logger) error {
 	// st satisfies game.Store (GetGameForOrganizer, OpenGameLobby, ListParticipants,
 	// GetGameByJoinCode, CreateParticipant, UpdateParticipantNameByPhone,
 	// ListQuestionsByGame, StartGameFirstQuestion, CloseCurrentQuestion,
-	// RevealCurrentQuestion, OpenNextQuestion, FinishGame).
-	engine := game.NewEngine(st, cfg.WhatsAppDisplayNumber, logger)
+	// RevealCurrentQuestion, OpenNextQuestion, FinishGame, UpdateAnswerGrade).
+	// The AI-grading concurrency cap is NewEngine's default
+	// (game.DefaultMaxConcurrentAIGrades); WithMaxConcurrentAIGrades exists
+	// to tune or shrink it, and production has no reason to.
+	engine := game.NewEngine(st, cfg.WhatsAppDisplayNumber, logger, game.WithAIGrader(aiGrader))
 	hub := ws.NewHub(logger)
 	wsHandler := ws.NewHandler(authSvc, engine, hub, logger)
 
@@ -155,17 +234,40 @@ func run(logger *slog.Logger) error {
 	// and bounded by dispatcherDrainTimeout. Returns true when the
 	// dispatcher stopped within its grace.
 	drainAndStop := func() bool {
+		// AI grading drains alongside the outbound queue, not after it: the
+		// two are independent (grading writes to Postgres, the dispatcher to
+		// Meta), and serializing them would add this budget to a shutdown
+		// path Railway already gives zero seconds by default. Every verdict
+		// that lands here is a pending row the next process does NOT have to
+		// discover and fail-close. Code review finding, story 3.6.
+		gradingDrained := make(chan bool, 1)
+		go func() {
+			gradeCtx, cancelGrade := context.WithTimeout(context.Background(), gradingDrainTimeout)
+			defer cancelGrade()
+			gradingDrained <- engine.WaitForGrading(gradeCtx)
+		}()
+
 		drainCtx, cancelDrain := context.WithTimeout(context.Background(), dispatcherDrainTimeout)
 		dispatcher.Drain(drainCtx)
 		cancelDrain()
 		stopDispatcher()
+		dispatcherStopped := true
 		select {
 		case <-dispatcherDone:
-			return true
 		case <-time.After(dispatcherStopGrace):
 			logger.Warn("dispatcher did not stop within the shutdown grace")
+			dispatcherStopped = false
+		}
+
+		if !<-gradingDrained {
+			// Not an error: those rows are pending, not lost, and the next
+			// process's orphan sweep fail-closes them within
+			// game.OrphanAnswerAge. Logged because it is the signal that a
+			// question may briefly refuse to reveal after a redeploy.
+			logger.Warn("AI grading did not drain within the shutdown grace; pending answers left to the orphan sweep")
 			return false
 		}
+		return dispatcherStopped
 	}
 
 	select {

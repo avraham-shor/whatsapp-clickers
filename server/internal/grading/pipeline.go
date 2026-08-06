@@ -1,6 +1,9 @@
 // Package grading implements FR-15/FR-16's answer-correctness pipeline —
 // MCQ mechanical grading and Free-Text's Exact → Fuzzy → AI stages
-// (Fuzzy landed in Story 3.5; AI lands in Story 3.6).
+// (Fuzzy landed in Story 3.5; AI landed in Story 3.6). Every stage but AI
+// is pure, zero-I/O computation — AI (ai.go) is the package's first real
+// network call, gated behind the AIGrader interface so the rest of the
+// package stays testable without it.
 // Pure functions, no store/DB dependency — game calls in, store persists
 // the verdict game hands back (architecture: game imports grading).
 package grading
@@ -19,7 +22,7 @@ const (
 	StageMCQ   Stage = "mcq"
 	StageExact Stage = "exact"
 	StageFuzzy Stage = "fuzzy"
-	// StageAI joins this list in Story 3.6.
+	StageAI    Stage = "ai"
 )
 
 // GradeMCQ reports whether response (a normalized "1".."4" digit
