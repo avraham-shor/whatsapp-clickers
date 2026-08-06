@@ -65,9 +65,18 @@ type stubStore struct {
 	closeCurrentQuestionErr    error
 	closeCurrentQuestionCalls  int
 
-	revealCurrentQuestionResult gen.Game
-	revealCurrentQuestionErr    error
-	revealCurrentQuestionCalls  int
+	revealCurrentQuestionAndAwardPointsResult gen.Game
+	revealCurrentQuestionAndAwardPointsErr    error
+	revealCurrentQuestionAndAwardPointsCalls  int
+	revealCurrentQuestionAndAwardPointsArg    []store.AnswerPointsParams
+
+	listAnswersForScoringResult   []store.AnswerForScoring
+	listAnswersForScoringErr      error
+	listAnswersForScoringGameID   string
+	listAnswersForScoringPosition int32
+
+	getLeaderboardResult []store.ParticipantScore
+	getLeaderboardErr    error
 
 	openNextQuestionResult   gen.Game
 	openNextQuestionErr      error
@@ -169,9 +178,20 @@ func (s *stubStore) CloseCurrentQuestion(ctx context.Context, gameID, organizerI
 	return s.closeCurrentQuestionResult, s.closeCurrentQuestionErr
 }
 
-func (s *stubStore) RevealCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
-	s.revealCurrentQuestionCalls++
-	return s.revealCurrentQuestionResult, s.revealCurrentQuestionErr
+func (s *stubStore) RevealCurrentQuestionAndAwardPoints(ctx context.Context, gameID, organizerID string, points []store.AnswerPointsParams) (gen.Game, error) {
+	s.revealCurrentQuestionAndAwardPointsCalls++
+	s.revealCurrentQuestionAndAwardPointsArg = points
+	return s.revealCurrentQuestionAndAwardPointsResult, s.revealCurrentQuestionAndAwardPointsErr
+}
+
+func (s *stubStore) ListAnswersForScoring(ctx context.Context, gameID string, position int32) ([]store.AnswerForScoring, error) {
+	s.listAnswersForScoringGameID = gameID
+	s.listAnswersForScoringPosition = position
+	return s.listAnswersForScoringResult, s.listAnswersForScoringErr
+}
+
+func (s *stubStore) GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error) {
+	return s.getLeaderboardResult, s.getLeaderboardErr
 }
 
 func (s *stubStore) OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error) {
@@ -262,7 +282,7 @@ func questionClosedStub() *stubStore {
 	return &stubStore{
 		game:                      g,
 		listQuestionsByGameResult: oneQuestion(),
-		revealCurrentQuestionResult: gen.Game{
+		revealCurrentQuestionAndAwardPointsResult: gen.Game{
 			ID: testGameID, OrganizerID: testOrganizerID, State: StateRevealed, JoinCode: "AB2CD3",
 			CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff,
 		},
@@ -319,6 +339,98 @@ func TestOpenLobbyFromDraftReturnsLobbySnapshot(t *testing.T) {
 	}
 	if st.openGameLobbyCalls != 1 {
 		t.Errorf("OpenGameLobby called %d times, want 1", st.openGameLobbyCalls)
+	}
+	if snap.Leaderboard == nil || len(snap.Leaderboard) != 0 {
+		t.Errorf("Leaderboard = %+v, want a non-nil empty slice when GetLeaderboard returns nothing", snap.Leaderboard)
+	}
+}
+
+// Expectations here are hard-coded rather than derived from
+// RankLeaderboard: building want by calling the unit under test made this
+// test move in lockstep with any regression in it (a no-op sort passed).
+// The store order below is deliberately NOT the display order, so the
+// snapshot's ranking work is what the assertion actually observes.
+func TestBuildSnapshotIncludesRankedLeaderboard(t *testing.T) {
+	st := draftStub()
+	st.getLeaderboardResult = []store.ParticipantScore{
+		{ParticipantID: "p3", DisplayName: "Carol", Score: 50},
+		{ParticipantID: "p1", DisplayName: "Alice", Score: 100},
+		{ParticipantID: "p2", DisplayName: "Bob", Score: 100},
+	}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.OpenLobby(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("OpenLobby() err = %v, want nil", err)
+	}
+	want := []LeaderboardEntry{
+		{ParticipantID: "p1", DisplayName: "Alice", Score: 100, Rank: 1},
+		{ParticipantID: "p2", DisplayName: "Bob", Score: 100, Rank: 1},
+		{ParticipantID: "p3", DisplayName: "Carol", Score: 50, Rank: 3},
+	}
+	if len(snap.Leaderboard) != len(want) {
+		t.Fatalf("Leaderboard = %+v, want %+v", snap.Leaderboard, want)
+	}
+	for i := range want {
+		if snap.Leaderboard[i] != want[i] {
+			t.Errorf("Leaderboard[%d] = %+v, want %+v", i, snap.Leaderboard[i], want[i])
+		}
+	}
+}
+
+// The degraded path: buildSnapshot fails after the transition already
+// committed, so snapshotAfterCommit falls back to emptySnapshot. The
+// leaderboard must still be a non-nil empty slice — web's LobbySnapshot
+// types it as non-nullable. Nothing else covered this: the non-nil
+// assertion in TestOpenLobbyFromDraftReturnsLobbySnapshot exercises the
+// buildSnapshot SUCCESS path, where RankLeaderboard supplies the empty
+// slice, so deleting emptySnapshot's own default changed no test.
+func TestSnapshotAfterCommitDegradesWithNonNilLeaderboard(t *testing.T) {
+	st := questionClosedStub()
+	st.listQuestionsByGameErr = errors.New("questions unavailable")
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Reveal() err = %v, want nil (a failed snapshot build must not fail the committed transition)", err)
+	}
+	if snap.Leaderboard == nil {
+		t.Error("Leaderboard = nil on the degraded snapshot, want a non-nil empty slice")
+	}
+	if len(snap.Leaderboard) != 0 {
+		t.Errorf("Leaderboard = %+v, want empty on the degraded snapshot", snap.Leaderboard)
+	}
+}
+
+func TestRevealPropagatesListAnswersForScoringError(t *testing.T) {
+	st := questionClosedStub()
+	boom := errors.New("scoring read failed")
+	st.listAnswersForScoringErr = boom
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, boom) {
+		t.Fatalf("Reveal() err = %v, want the store error propagated unwrapped", err)
+	}
+	if st.revealCurrentQuestionAndAwardPointsCalls != 0 {
+		t.Errorf("RevealCurrentQuestionAndAwardPoints called %d times, want 0 (a failed scoring read must not fall through to the write)", st.revealCurrentQuestionAndAwardPointsCalls)
+	}
+}
+
+// Engine.Snapshot is the one buildSnapshot caller that does NOT degrade
+// (ws.Handler's read path), so it is where the new GetLeaderboard error
+// return is observable. Worth pinning: a leaderboard read failure now
+// fails the whole snapshot, discarding participants, question count and
+// current question along with it.
+func TestSnapshotPropagatesGetLeaderboardError(t *testing.T) {
+	st := draftStub()
+	boom := errors.New("leaderboard unavailable")
+	st.getLeaderboardErr = boom
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, boom) {
+		t.Fatalf("Snapshot() err = %v, want the GetLeaderboard error propagated unwrapped", err)
 	}
 }
 
@@ -573,8 +685,8 @@ func TestRevealFromQuestionClosedReturnsRevealedSnapshot(t *testing.T) {
 	if snap.State != StateRevealed {
 		t.Errorf("State = %q, want revealed", snap.State)
 	}
-	if st.revealCurrentQuestionCalls != 1 {
-		t.Errorf("RevealCurrentQuestion called %d times, want 1", st.revealCurrentQuestionCalls)
+	if st.revealCurrentQuestionAndAwardPointsCalls != 1 {
+		t.Errorf("RevealCurrentQuestionAndAwardPoints called %d times, want 1", st.revealCurrentQuestionAndAwardPointsCalls)
 	}
 }
 
@@ -587,14 +699,14 @@ func TestRevealFromNonQuestionClosedReturnsErrNotQuestionClosedWithoutWriting(t 
 	if !errors.Is(err, ErrNotQuestionClosed) {
 		t.Fatalf("Reveal() err = %v, want ErrNotQuestionClosed", err)
 	}
-	if st.revealCurrentQuestionCalls != 0 {
-		t.Errorf("RevealCurrentQuestion called %d times, want 0", st.revealCurrentQuestionCalls)
+	if st.revealCurrentQuestionAndAwardPointsCalls != 0 {
+		t.Errorf("RevealCurrentQuestionAndAwardPoints called %d times, want 0", st.revealCurrentQuestionAndAwardPointsCalls)
 	}
 }
 
 func TestRevealRaceLossReturnsErrNotQuestionClosed(t *testing.T) {
 	st := questionClosedStub()
-	st.revealCurrentQuestionErr = store.ErrNotFound
+	st.revealCurrentQuestionAndAwardPointsErr = store.ErrNotFound
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
 	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
@@ -618,8 +730,8 @@ func TestRevealSucceedsWhenNoOutstandingGrades(t *testing.T) {
 	if st.countUngradedAnswersForCurrentQuestionCalls != 1 {
 		t.Errorf("CountUngradedAnswersForCurrentQuestion called %d times, want 1", st.countUngradedAnswersForCurrentQuestionCalls)
 	}
-	if st.revealCurrentQuestionCalls != 1 {
-		t.Errorf("RevealCurrentQuestion called %d times, want 1", st.revealCurrentQuestionCalls)
+	if st.revealCurrentQuestionAndAwardPointsCalls != 1 {
+		t.Errorf("RevealCurrentQuestionAndAwardPoints called %d times, want 1", st.revealCurrentQuestionAndAwardPointsCalls)
 	}
 }
 
@@ -632,8 +744,8 @@ func TestRevealReturnsErrGradingIncompleteWhenOutstandingGradesExist(t *testing.
 	if !errors.Is(err, ErrGradingIncomplete) {
 		t.Fatalf("Reveal() err = %v, want ErrGradingIncomplete", err)
 	}
-	if st.revealCurrentQuestionCalls != 0 {
-		t.Errorf("RevealCurrentQuestion called %d times, want 0 (the guarded write must never be attempted)", st.revealCurrentQuestionCalls)
+	if st.revealCurrentQuestionAndAwardPointsCalls != 0 {
+		t.Errorf("RevealCurrentQuestionAndAwardPoints called %d times, want 0 (the guarded write must never be attempted)", st.revealCurrentQuestionAndAwardPointsCalls)
 	}
 }
 
@@ -650,8 +762,56 @@ func TestRevealPropagatesCountUngradedAnswersError(t *testing.T) {
 	if !errors.Is(err, boom) {
 		t.Fatalf("Reveal() err = %v, want the store error propagated unwrapped", err)
 	}
-	if st.revealCurrentQuestionCalls != 0 {
-		t.Errorf("RevealCurrentQuestion called %d times, want 0 (a failed count must not fall through to the write)", st.revealCurrentQuestionCalls)
+	if st.revealCurrentQuestionAndAwardPointsCalls != 0 {
+		t.Errorf("RevealCurrentQuestionAndAwardPoints called %d times, want 0 (a failed count must not fall through to the write)", st.revealCurrentQuestionAndAwardPointsCalls)
+	}
+}
+
+func TestRevealComputesAndPersistsSpeedBonusPoints(t *testing.T) {
+	st := questionClosedStub()
+	st.game.PointsPerCorrect = 100
+	st.game.SpeedBonusFirst = 50
+	st.game.SpeedBonusSecond = 30
+	st.game.SpeedBonusThird = 10
+	answers := []store.AnswerForScoring{
+		{AnswerID: "a1", IsCorrect: true, ReceivedAt: testCutoff.Add(-3 * time.Second), Seq: 1},
+		{AnswerID: "a2", IsCorrect: true, ReceivedAt: testCutoff.Add(-2 * time.Second), Seq: 2},
+		{AnswerID: "a3", IsCorrect: false, ReceivedAt: testCutoff.Add(-1 * time.Second), Seq: 3},
+	}
+	st.listAnswersForScoringResult = answers
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Reveal() err = %v, want nil", err)
+	}
+
+	// Hard-coded rather than derived from AwardPoints: building want by
+	// calling the unit under test made this assertion move in lockstep
+	// with the arithmetic it exists to pin.
+	want := map[string]int32{
+		"a1": 150, // first correct: 100 + SpeedBonusFirst
+		"a2": 130, // second correct: 100 + SpeedBonusSecond
+		"a3": 0,   // incorrect
+	}
+	got := pointsByAnswerID(st.revealCurrentQuestionAndAwardPointsArg)
+	if len(got) != len(want) {
+		t.Fatalf("persisted %d awards (%+v), want %d — every answer must be scored, including incorrect ones (migration 00014: non-NULL means revealed-and-scored)", len(got), st.revealCurrentQuestionAndAwardPointsArg, len(want))
+	}
+	for id, wantPoints := range want {
+		if got[id] != wantPoints {
+			t.Errorf("persisted points[%q] = %d, want %d", id, got[id], wantPoints)
+		}
+	}
+
+	// The scoring read must target the question actually being revealed.
+	// Nothing else pins this: the engine passes g.CurrentQuestionPosition,
+	// and a hard-coded position passed every test before this assertion.
+	if st.listAnswersForScoringGameID != testGameID {
+		t.Errorf("ListAnswersForScoring gameID = %q, want %q", st.listAnswersForScoringGameID, testGameID)
+	}
+	if st.listAnswersForScoringPosition != st.game.CurrentQuestionPosition {
+		t.Errorf("ListAnswersForScoring position = %d, want %d (the revealed question's position)", st.listAnswersForScoringPosition, st.game.CurrentQuestionPosition)
 	}
 }
 

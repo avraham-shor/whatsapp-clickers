@@ -92,6 +92,54 @@ func (q *Queries) FailCloseOrphanedAnswers(ctx context.Context, olderThan time.T
 	return count, err
 }
 
+const getLeaderboard = `-- name: GetLeaderboard :many
+SELECT p.id AS participant_id, p.display_name, COALESCE(SUM(a.points_awarded), 0)::int AS score
+FROM participants p
+LEFT JOIN answers a ON a.participant_id = p.id AND a.points_awarded IS NOT NULL
+WHERE p.game_id = $1 AND p.role = 'player'
+GROUP BY p.id, p.display_name
+ORDER BY p.joined_at ASC, p.id ASC
+`
+
+type GetLeaderboardRow struct {
+	ParticipantID string
+	DisplayName   string
+	Score         int32
+}
+
+// Cumulative per-participant score (FR-17/18) — sums points_awarded
+// across every revealed Question's answers; points_awarded IS NOT NULL
+// is exactly "this answer's Question has been revealed" (see migration
+// 00014). SUM(integer) is bigint in Postgres; ::int narrows back to
+// int32 to match points_per_correct's own column type. LEFT JOIN so a
+// participant with zero answers (hasn't played yet, or every answer
+// they gave is still un-revealed) still gets a 0-score row instead of
+// being absent from the leaderboard. role = 'player' excludes
+// Spectators explicitly — they never answer, but this leaderboard is
+// scoped intentionally rather than inheriting the role-blind roster gap
+// tracked elsewhere (deferred-work.md, 2.5 review). ORDER BY mirrors
+// ListParticipants' own tie-break exactly, so RankLeaderboard's stable
+// sort breaks score ties by join order.
+func (q *Queries) GetLeaderboard(ctx context.Context, gameID string) ([]GetLeaderboardRow, error) {
+	rows, err := q.db.Query(ctx, getLeaderboard, gameID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLeaderboardRow
+	for rows.Next() {
+		var i GetLeaderboardRow
+		if err := rows.Scan(&i.ParticipantID, &i.DisplayName, &i.Score); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getOpenQuestionForPlayer = `-- name: GetOpenQuestionForPlayer :one
 SELECT g.id AS game_id, q.id AS question_id, q.type AS question_type,
        q.text AS question_text, q.correct_option, q.accepted_answers,
@@ -184,6 +232,79 @@ func (q *Queries) GetOpenQuestionForPlayer(ctx context.Context, phone string) (G
 	return i, err
 }
 
+const listAnswersForScoring = `-- name: ListAnswersForScoring :many
+SELECT a.id, a.is_correct, a.received_at, a.seq
+FROM answers a
+WHERE a.question_id = (
+    SELECT q.id FROM questions q
+    WHERE q.game_id = $1 AND q.position = $2
+    ORDER BY q.created_at
+    LIMIT 1
+)
+`
+
+type ListAnswersForScoringParams struct {
+	GameID   string
+	Position int32
+}
+
+type ListAnswersForScoringRow struct {
+	ID         string
+	IsCorrect  pgtype.Bool
+	ReceivedAt time.Time
+	Seq        pgtype.Int8
+}
+
+// Answers to the Question at (game_id, position), already graded —
+// read by game.Engine.Reveal AFTER its CountUngradedAnswersForCurrentQuestion
+// pre-check confirms zero pending rows, and BEFORE the guarded
+// RevealCurrentQuestionAndAwardPoints transaction (games.sql). Safe to
+// read outside that transaction: RecordAnswer's own write-time guard
+// (state = 'question_open') means no new answer can appear for this
+// question once Reveal's caller has already observed
+// state = 'question_closed', and nothing mutates is_correct/stage
+// between the zero-pending check and this read (no other actor grades
+// an already-graded row). is_correct is read via `.Bool` without a
+// `.Valid` check downstream for the same reason — the zero-pending
+// precondition guarantees every row here is graded.
+//
+// The ORDER BY q.created_at / LIMIT 1 subquery resolves (game_id,
+// position) to exactly ONE question, matching GetOpenQuestionForPlayer
+// above and buildSnapshot's ORDER BY q.position, q.created_at. Without
+// it a plain join would return the union of every question sharing that
+// position, and 00003 deliberately declines UNIQUE (game_id, position)
+// (see GetOpenQuestionForPlayer's comment: reorder rewrites 1..N inside
+// a transaction, and CreateQuestion's max(position)+1 has no backstop
+// against concurrent inserts). Unioned answers would spread the three
+// speed bonuses across two questions AND stamp points_awarded on rows
+// belonging to a question that was never revealed, breaking the
+// "non-NULL means revealed" invariant GetLeaderboard depends on. Code
+// review finding, story 3.7.
+func (q *Queries) ListAnswersForScoring(ctx context.Context, arg ListAnswersForScoringParams) ([]ListAnswersForScoringRow, error) {
+	rows, err := q.db.Query(ctx, listAnswersForScoring, arg.GameID, arg.Position)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAnswersForScoringRow
+	for rows.Next() {
+		var i ListAnswersForScoringRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsCorrect,
+			&i.ReceivedAt,
+			&i.Seq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordAnswer = `-- name: RecordAnswer :one
 INSERT INTO answers (question_id, participant_id, response, received_at, is_correct, stage)
 SELECT $1, $2, $3, $4, $5, $6
@@ -193,7 +314,7 @@ WHERE g.id = $7
   AND g.state = 'question_open'
   AND g.current_question_position = q.position
   AND now() <= g.answer_cutoff_at
-RETURNING id, question_id, participant_id, response, received_at, seq, is_correct, stage
+RETURNING id, question_id, participant_id, response, received_at, seq, is_correct, stage, points_awarded
 `
 
 type RecordAnswerParams struct {
@@ -244,6 +365,7 @@ func (q *Queries) RecordAnswer(ctx context.Context, arg RecordAnswerParams) (Ans
 		&i.Seq,
 		&i.IsCorrect,
 		&i.Stage,
+		&i.PointsAwarded,
 	)
 	return i, err
 }
@@ -274,5 +396,51 @@ type UpdateAnswerGradeParams struct {
 // INSERT. Code review finding, story 3.6.
 func (q *Queries) UpdateAnswerGrade(ctx context.Context, arg UpdateAnswerGradeParams) error {
 	_, err := q.db.Exec(ctx, updateAnswerGrade, arg.IsCorrect, arg.Stage, arg.ID)
+	return err
+}
+
+const updateAnswerPointsBatch = `-- name: UpdateAnswerPointsBatch :exec
+UPDATE answers a
+SET points_awarded = v.points
+FROM (
+    SELECT unnest($1::uuid[]) AS id,
+           unnest($2::int[]) AS points
+) AS v
+WHERE a.id = v.id AND a.points_awarded IS NULL
+`
+
+type UpdateAnswerPointsBatchParams struct {
+	AnswerIds []string
+	Points    []int32
+}
+
+// Persists every answer's computed point award for one revealed question
+// in a SINGLE statement (story 3.7).
+//
+// Set-based via unnest rather than one UPDATE per answer: this runs
+// inside RevealCurrentQuestionAndAwardPoints' transaction, itself inside
+// handleReveal's fixed 5s request budget. A per-row loop made the reveal
+// O(answers) sequential round-trips while holding the transaction open,
+// so at the 500-participant scale epics.md asks the design not to
+// preclude, the deadline could expire mid-loop — and because that
+// expiry is deterministic rather than transient, every retry would fail
+// identically and wedge the game at question_closed with Reveal the only
+// route out. Code review finding, story 3.7.
+//
+// points_awarded IS NULL is a write-time guard, exactly mirroring
+// UpdateAnswerGrade's stage IS NULL and for the same reason: a score
+// already persisted for this answer has, by construction, already been
+// revealed to the room, so a second write is a silent rewrite of a
+// published value rather than a correction. Making the write idempotent
+// also means any future re-reveal/correction path no-ops here instead of
+// reassigning speed-bonus slots. Code review finding, story 3.7.
+// (The two single-argument unnests in a subquery SELECT list, rather
+// than the tidier two-argument `unnest(a, b) AS v(id, points)`, are
+// purely to stay inside what sqlc v1.31's catalog can analyze — it does
+// not know the multi-argument form. Postgres evaluates multiple
+// set-returning functions in a SELECT list in lockstep, and the two
+// arrays are built from the same slice, so the pairing is exact.)
+func (q *Queries) UpdateAnswerPointsBatch(ctx context.Context, arg UpdateAnswerPointsBatchParams) error {
+	_, err := q.db.Exec(ctx, updateAnswerPointsBatch, arg.AnswerIds, arg.Points)
 	return err
 }

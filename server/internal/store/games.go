@@ -166,15 +166,55 @@ func (s *Store) CloseCurrentQuestion(ctx context.Context, gameID, organizerID st
 	return game, err
 }
 
-// RevealCurrentQuestion transitions a game from question_closed to
-// revealed; a foreign/missing game or one not question_closed (including a
-// lost race) is ErrNotFound.
-func (s *Store) RevealCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
-	game, err := s.q.RevealCurrentQuestion(ctx, gen.RevealCurrentQuestionParams{ID: gameID, OrganizerID: organizerID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return gen.Game{}, ErrNotFound
+// RevealCurrentQuestionAndAwardPoints transitions gameID from
+// question_closed to revealed AND persists each answer's points_awarded
+// for the question just revealed, atomically (FR-17, story 3.7) — the
+// state transition and the scoring write happen together or not at all,
+// so points_awarded can never be non-NULL for a question the state
+// machine says isn't revealed, or vice versa. points is already
+// computed by game.AwardPoints (pure, no I/O) — this method only
+// persists what it's given, same posture as RecordAnswer's pre-graded
+// IsCorrect/Stage. A foreign/missing game, or one not question_closed
+// (including a lost race), is ErrNotFound.
+//
+// The scoring write is ONE set-based statement (UpdateAnswerPointsBatch,
+// queries/answers.sql) rather than a loop, so the transaction costs two
+// round-trips regardless of participant count — see that query's comment
+// for why an O(answers) loop inside handleReveal's 5s budget was a
+// deterministic wedge rather than a mere slowdown.
+func (s *Store) RevealCurrentQuestionAndAwardPoints(ctx context.Context, gameID, organizerID string, points []AnswerPointsParams) (gen.Game, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return gen.Game{}, fmt.Errorf("begin reveal: %w", err)
 	}
-	return game, err
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+
+	g, err := q.RevealCurrentQuestion(ctx, gen.RevealCurrentQuestionParams{ID: gameID, OrganizerID: organizerID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.Game{}, ErrNotFound
+		}
+		return gen.Game{}, err
+	}
+	if len(points) > 0 {
+		ids := make([]string, len(points))
+		awards := make([]int32, len(points))
+		for i, p := range points {
+			ids[i] = p.AnswerID
+			awards[i] = p.Points
+		}
+		if err := q.UpdateAnswerPointsBatch(ctx, gen.UpdateAnswerPointsBatchParams{
+			AnswerIds: ids,
+			Points:    awards,
+		}); err != nil {
+			return gen.Game{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return gen.Game{}, err
+	}
+	return g, nil
 }
 
 // OpenNextQuestion transitions a game from revealed to question_open on the

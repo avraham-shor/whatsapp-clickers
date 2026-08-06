@@ -1,0 +1,35 @@
+-- +goose Up
+-- Persists each answer's computed point award (FR-17, story 3.7) at
+-- Reveal time. NULL means "this answer's Question has not been revealed
+-- yet" (mirrors 00011's is_correct/stage NULL convention); a non-NULL
+-- value — including 0, for an incorrect answer or a correct one outside
+-- the top three — means "revealed and scored". Summing points_awarded
+-- over a participant's answers, filtered to IS NOT NULL, IS the
+-- cumulative leaderboard score: no separate "was this question
+-- revealed" tracking is needed, which matters because
+-- current_question_position resets to 0 on FinishGame (00009) and would
+-- otherwise make "which questions were revealed" undecidable once a
+-- game ends.
+--
+-- No backfill, deliberately — unlike 00011, which DID backfill the
+-- structurally identical case and recorded why ("any game sitting on a
+-- question with pre-3.4 answers could never be revealed again"). The
+-- difference is that a missing grade BLOCKS reveal (the state machine
+-- refuses to advance), whereas a missing points_awarded only makes an
+-- already-revealed question score 0 — nothing wedges. Any answer that
+-- predates this migration and belongs to an already-revealed question
+-- therefore stays NULL forever: Reveal only ever writes points for
+-- games.current_question_position, and that position advances
+-- monotonically, so no later reveal revisits it. Those rows are dropped
+-- by GetLeaderboard's `points_awarded IS NOT NULL` join predicate and
+-- read as 0 for the rest of that game's life. Accepted (Avraham,
+-- 2026-08-06 code review of story 3.7) on the grounds that no deployed
+-- game has passed a reveal, so the affected set is empty in practice.
+-- This is the one case where the "IS NOT NULL means revealed" invariant
+-- asserted above does not hold; if that ever stops being true, a
+-- recompute backfill has to re-derive bonus order from received_at/seq
+-- and the games row's scoring config.
+ALTER TABLE answers ADD COLUMN points_awarded INTEGER CHECK (points_awarded IS NULL OR points_awarded >= 0);
+
+-- +goose Down
+ALTER TABLE answers DROP COLUMN points_awarded;

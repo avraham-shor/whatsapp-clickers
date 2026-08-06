@@ -12,6 +12,7 @@ type Snapshot struct {
 	Participants     []ParticipantSummary `json:"participants"`
 	QuestionCount    int                  `json:"questionCount"`
 	CurrentQuestion  *CurrentQuestion     `json:"currentQuestion"`
+	Leaderboard      []LeaderboardEntry   `json:"leaderboard"`
 }
 
 // ParticipantSummary is the participant shape a lobby/live client renders;

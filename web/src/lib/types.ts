@@ -69,6 +69,15 @@ export interface CurrentQuestion {
   answeredCount: number
 }
 
+/** Mirrors the Go game.LeaderboardEntry — one ranked row of the live
+ * leaderboard (FR-17/18). Equal scores share a rank. */
+export interface LeaderboardEntry {
+  participantId: string
+  displayName: string
+  score: number
+  rank: number
+}
+
 /** Mirrors the Go game.Snapshot — the REST open-lobby response body and the
  * WS envelope's "state" field share this one shape. */
 export interface LobbySnapshot {
@@ -80,6 +89,7 @@ export interface LobbySnapshot {
   participants: { id: string; displayName: string }[]
   questionCount: number
   currentQuestion: CurrentQuestion | null
+  leaderboard: LeaderboardEntry[]
 }
 
 /** The one WS wire message shape: server->client only, full snapshots. */

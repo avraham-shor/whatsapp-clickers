@@ -37,6 +37,9 @@
 generated: 2026-07-10
 last_updated: 2026-08-06
 
+# note: 3.7's baseline_commit predates 3.6's commit landing; 3.7 branches
+# from story/3-6-ai-semantic-validation-fail-closed (commit 7a4e55e), not main
+
 project: whatsapp-clickers
 project_key: NOKEY
 tracking_system: file-system
@@ -69,8 +72,8 @@ development_status:
   3-4-grading-pipeline-mcq-and-exact-match: done
   3-5-hebrew-fuzzy-matching: done
   3-6-ai-semantic-validation-fail-closed: done
-  3-7-scoring-with-speed-bonuses: ready-for-dev
-  3-8-personal-results-after-reveal: backlog
+  3-7-scoring-with-speed-bonuses: done
+  3-8-personal-results-after-reveal: ready-for-dev
   3-9-final-results-for-everyone: backlog
   3-10-post-game-summary-on-the-dashboard: backlog
   epic-3-retrospective: optional

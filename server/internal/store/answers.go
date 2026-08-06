@@ -139,3 +139,67 @@ func (s *Store) UpdateAnswerGrade(ctx context.Context, answerID string, isCorrec
 func (s *Store) FailCloseOrphanedAnswers(ctx context.Context, olderThan time.Time) (int64, error) {
 	return s.q.FailCloseOrphanedAnswers(ctx, olderThan)
 }
+
+// AnswerForScoring is one graded answer's scoring inputs, read by
+// game.Engine.Reveal before it computes points via game.AwardPoints.
+type AnswerForScoring struct {
+	AnswerID   string
+	IsCorrect  bool
+	ReceivedAt time.Time
+	Seq        int64
+}
+
+// AnswerPointsParams carries one answer's already-computed point award
+// (game.AwardPoints, pure, no I/O) across the store boundary — same
+// "already computed, store just persists" posture as RecordAnswerParams'
+// pre-graded IsCorrect/Stage.
+type AnswerPointsParams struct {
+	AnswerID string
+	Points   int32
+}
+
+// ParticipantScore is one participant's cumulative score — the input to
+// game.RankLeaderboard.
+type ParticipantScore struct {
+	ParticipantID string
+	DisplayName   string
+	Score         int32
+}
+
+// ListAnswersForScoring returns the answers to the question at
+// (gameID, position) in no particular order — game.AwardPoints does its
+// own sort by ReceivedAt/Seq. The question is resolved by position, not
+// by id, so the caller supplies the position it intends to score
+// (game.Engine.Reveal passes g.CurrentQuestionPosition).
+//
+// IsCorrect is read via .Bool with no .Valid check: the rows are graded
+// by precondition, not by this query. Reveal's
+// CountUngradedAnswersForCurrentQuestion gate has already returned zero,
+// and answers_grading_shape (00011) pairs is_correct with stage, so a
+// zero stage IS NULL count means every row here has a real verdict.
+func (s *Store) ListAnswersForScoring(ctx context.Context, gameID string, position int32) ([]AnswerForScoring, error) {
+	rows, err := s.q.ListAnswersForScoring(ctx, gen.ListAnswersForScoringParams{GameID: gameID, Position: position})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AnswerForScoring, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, AnswerForScoring{AnswerID: r.ID, IsCorrect: r.IsCorrect.Bool, ReceivedAt: r.ReceivedAt, Seq: r.Seq.Int64})
+	}
+	return out, nil
+}
+
+// GetLeaderboard returns every player-role Participant's cumulative
+// score for gameID, in join order (game.RankLeaderboard sorts by score
+// and uses this order to break ties).
+func (s *Store) GetLeaderboard(ctx context.Context, gameID string) ([]ParticipantScore, error) {
+	rows, err := s.q.GetLeaderboard(ctx, gameID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ParticipantScore, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ParticipantScore{ParticipantID: r.ParticipantID, DisplayName: r.DisplayName, Score: r.Score})
+	}
+	return out, nil
+}

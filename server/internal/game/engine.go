@@ -61,7 +61,9 @@ type Store interface {
 	ListQuestionsByGame(ctx context.Context, gameID, organizerID string) ([]gen.Question, error)
 	StartGameFirstQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	CloseCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error)
-	RevealCurrentQuestion(ctx context.Context, gameID, organizerID string) (gen.Game, error)
+	ListAnswersForScoring(ctx context.Context, gameID string, position int32) ([]store.AnswerForScoring, error)
+	RevealCurrentQuestionAndAwardPoints(ctx context.Context, gameID, organizerID string, points []store.AnswerPointsParams) (gen.Game, error)
+	GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error)
 	OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error)
 	FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error)
@@ -265,6 +267,8 @@ func (e *Engine) CloseQuestion(ctx context.Context, gameID, organizerID string) 
 // one that lost a concurrent transition race) is ErrNotQuestionClosed; a
 // missing/foreign game is store.ErrNotFound; a question_closed game with
 // outstanding ungraded answers is ErrGradingIncomplete (FR-16 epic AC-3).
+// It also computes and persists Speed Bonus scoring for the revealed
+// question (FR-17, story 3.7).
 func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
 	g, err := e.store.GetGameForOrganizer(ctx, gameID, organizerID)
 	if err != nil {
@@ -280,31 +284,50 @@ func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapsh
 	if outstanding > 0 {
 		return Snapshot{}, ErrGradingIncomplete
 	}
-	g, err = e.store.RevealCurrentQuestion(ctx, gameID, organizerID)
+
+	answers, err := e.store.ListAnswersForScoring(ctx, gameID, g.CurrentQuestionPosition)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	cfg := ScoringConfig{
+		PointsPerCorrect: g.PointsPerCorrect,
+		SpeedBonusFirst:  g.SpeedBonusFirst,
+		SpeedBonusSecond: g.SpeedBonusSecond,
+		SpeedBonusThird:  g.SpeedBonusThird,
+	}
+	points := AwardPoints(answers, cfg)
+
+	g, err = e.store.RevealCurrentQuestionAndAwardPoints(ctx, gameID, organizerID, points)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			// The write-time guard failed after a successful read. Unlike
-			// every other transition in this file, this guard is no longer
-			// single-condition — it can miss because a concurrent
-			// transition moved the game off question_closed, because no
-			// questions row matches current_question_position (the
-			// UPDATE ... FROM join is inner), or because an answer for the
-			// current question is ungraded. All three collapse to
-			// ErrNotQuestionClosed, so the reported cause can be wrong.
+			// Race-loss reinterpretation, same as every other transition
+			// here. Only the initial RevealCurrentQuestion UPDATE inside
+			// the transaction can return zero rows this way — the batch
+			// points write is an :exec whose targets were resolved moments
+			// ago by this same request, so an error from it propagates
+			// here as a genuine, un-reinterpreted failure instead.
 			//
-			// Note the count above cannot go stale underneath us: an
-			// answer can only be inserted while the game is question_open
+			// But WHICH condition that UPDATE missed on is still ambiguous,
+			// and this remains a known gap rather than a solved problem.
+			// Unlike every other transition in this file, its guard is not
+			// single-condition (queries/games.sql): it can miss because a
+			// concurrent transition moved the game off question_closed,
+			// because no questions row matches current_question_position
+			// (the UPDATE ... FROM join is inner), or because an answer for
+			// the current question is ungraded (the NOT EXISTS clause). All
+			// three collapse to ErrNotQuestionClosed, so the cause reported
+			// to the operator can be wrong.
+			//
+			// The count above cannot go stale underneath us: an answer can
+			// only be inserted while the game is question_open
 			// (RecordAnswer's own guard), and Reveal runs only from
-			// question_closed, so there is no window for a fresh ungraded
-			// answer to appear between the count and this write. The
-			// collapse is tolerable today because the join condition is
-			// unreachable in practice — question_closed is only arrived at
-			// via StartGameFirstQuestion/OpenNextQuestion, both of which
-			// require the matching questions row to exist, and every
-			// question mutation is state='draft'-guarded. Revisit when
-			// Story 3.6 makes the grading condition genuinely reachable:
-			// at that point these deserve distinct errors rather than one
-			// message that can send an operator after the wrong problem.
+			// question_closed. Story 3.6 made the grading condition
+			// genuinely reachable (async AI verdicts), which is when the
+			// original version of this comment said these deserve distinct
+			// errors rather than one message that can send an operator
+			// after the wrong problem — that is still true and still not
+			// done. Deferred at 3.7's code review; revisit whenever this
+			// path next changes.
 			return Snapshot{}, ErrNotQuestionClosed
 		}
 		return Snapshot{}, err
@@ -479,6 +502,12 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 		}
 	}
 
+	scores, err := e.store.GetLeaderboard(ctx, g.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	leaderboard := RankLeaderboard(scores)
+
 	return Snapshot{
 		GameID:           g.ID,
 		State:            g.State,
@@ -488,6 +517,7 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 		Participants:     summaries,
 		QuestionCount:    len(questions),
 		CurrentQuestion:  current,
+		Leaderboard:      leaderboard,
 	}, nil
 }
 
@@ -502,5 +532,6 @@ func emptySnapshot(platformNumber string, g gen.Game) Snapshot {
 		PlatformNumber:   platformNumber,
 		ParticipantCount: 0,
 		Participants:     []ParticipantSummary{},
+		Leaderboard:      []LeaderboardEntry{},
 	}
 }
