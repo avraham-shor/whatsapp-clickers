@@ -33,6 +33,7 @@ type stubControlEngine struct {
 	closeQuestionRequestedFor [][2]string
 
 	revealSnapshot     game.Snapshot
+	revealPosition     int32
 	revealErr          error
 	revealRequestedFor [][2]string
 
@@ -55,6 +56,16 @@ type stubControlEngine struct {
 	playerRecipientsErr          error
 	playerRecipientsRequestedFor []string
 	playerRecipientsDone         chan struct{}
+
+	// resultsForRevealedQuestionMu guards the fields below, same reasoning
+	// as playerRecipientsMu — dispatchAnswerRevealed also runs in a
+	// goroutine spawned after the HTTP response is written.
+	resultsForRevealedQuestionMu           sync.Mutex
+	resultsForRevealedQuestionResult       game.RevealedQuestionResults
+	resultsForRevealedQuestionErr          error
+	resultsForRevealedQuestionRequestedFor [][2]string // {gameID, organizerID}
+	resultsForRevealedQuestionPosition     int32
+	resultsForRevealedQuestionDone         chan struct{}
 }
 
 func (s *stubControlEngine) OpenLobby(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
@@ -72,9 +83,14 @@ func (s *stubControlEngine) CloseQuestion(ctx context.Context, gameID, organizer
 	return s.closeQuestionSnapshot, s.closeQuestionErr
 }
 
-func (s *stubControlEngine) Reveal(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
+// Reveal's second return is the just-revealed position, which
+// dispatchAnswerRevealed binds to instead of the snapshot (code review,
+// story 3.8). revealPosition defaults to 0, so tests that exercise result
+// dispatch must set it explicitly — 0 is the "not set" value the dispatch
+// guard rejects, exactly as on Reveal's own error paths.
+func (s *stubControlEngine) Reveal(ctx context.Context, gameID, organizerID string) (game.Snapshot, int32, error) {
 	s.revealRequestedFor = append(s.revealRequestedFor, [2]string{gameID, organizerID})
-	return s.revealSnapshot, s.revealErr
+	return s.revealSnapshot, s.revealPosition, s.revealErr
 }
 
 func (s *stubControlEngine) NextQuestion(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
@@ -104,6 +120,35 @@ func (s *stubControlEngine) PlayerRecipientsRequestedFor() []string {
 	s.playerRecipientsMu.Lock()
 	defer s.playerRecipientsMu.Unlock()
 	return append([]string(nil), s.playerRecipientsRequestedFor...)
+}
+
+// ResultsForRevealedQuestionRequestedFor and
+// ResultsForRevealedQuestionPosition copy under the mutex, same as
+// PlayerRecipientsRequestedFor — these fields are written from the
+// post-response dispatch goroutine, so tests must never read them
+// directly (code review, story 3.8).
+func (s *stubControlEngine) ResultsForRevealedQuestionRequestedFor() [][2]string {
+	s.resultsForRevealedQuestionMu.Lock()
+	defer s.resultsForRevealedQuestionMu.Unlock()
+	return append([][2]string(nil), s.resultsForRevealedQuestionRequestedFor...)
+}
+
+func (s *stubControlEngine) ResultsForRevealedQuestionPosition() int32 {
+	s.resultsForRevealedQuestionMu.Lock()
+	defer s.resultsForRevealedQuestionMu.Unlock()
+	return s.resultsForRevealedQuestionPosition
+}
+
+func (s *stubControlEngine) ResultsForRevealedQuestion(ctx context.Context, gameID, organizerID string, position int32) (game.RevealedQuestionResults, error) {
+	s.resultsForRevealedQuestionMu.Lock()
+	s.resultsForRevealedQuestionRequestedFor = append(s.resultsForRevealedQuestionRequestedFor, [2]string{gameID, organizerID})
+	s.resultsForRevealedQuestionPosition = position
+	result, err := s.resultsForRevealedQuestionResult, s.resultsForRevealedQuestionErr
+	s.resultsForRevealedQuestionMu.Unlock()
+	if s.resultsForRevealedQuestionDone != nil {
+		s.resultsForRevealedQuestionDone <- struct{}{}
+	}
+	return result, err
 }
 
 // stubBroadcaster implements SnapshotBroadcaster and records every call.
@@ -155,6 +200,39 @@ func (s *stubQuestionDispatcher) Calls() []dispatchCall {
 	return append([]dispatchCall(nil), s.calls...)
 }
 
+// stubResultDispatcher implements ResultDispatcher and records every
+// DispatchAnswerRevealed call, mirroring stubQuestionDispatcher's shape —
+// dispatchAnswerRevealed also runs in a goroutine spawned after the HTTP
+// response is written (see control.go).
+type stubResultDispatcher struct {
+	mu    sync.Mutex
+	calls []resultDispatchCall
+	done  chan struct{}
+}
+
+type resultDispatchCall struct {
+	gameID            string
+	results           []game.PersonalResult
+	correctAnswerText string
+	isLastQuestion    bool
+}
+
+func (s *stubResultDispatcher) DispatchAnswerRevealed(gameID string, results []game.PersonalResult, correctAnswerText string, isLastQuestion bool) {
+	s.mu.Lock()
+	s.calls = append(s.calls, resultDispatchCall{gameID, results, correctAnswerText, isLastQuestion})
+	s.mu.Unlock()
+	if s.done != nil {
+		s.done <- struct{}{}
+	}
+}
+
+// Calls returns a thread-safe snapshot of every recorded call.
+func (s *stubResultDispatcher) Calls() []resultDispatchCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]resultDispatchCall(nil), s.calls...)
+}
+
 // waitForSignal blocks until ch fires or the test times out — used to
 // observe the dispatch goroutine handleStartGame/handleNextQuestion spawn
 // after writing their HTTP response, without sleeping or racing it.
@@ -168,18 +246,27 @@ func waitForSignal(t *testing.T, ch <-chan struct{}) {
 }
 
 // controlRouter builds a router with an authenticated org-1 session and the
-// given ControlEngine/SnapshotBroadcaster stubs. No QuestionDispatcher —
-// none of this file's existing tests exercise WhatsApp dispatch.
+// given ControlEngine/SnapshotBroadcaster stubs. No QuestionDispatcher/
+// ResultDispatcher — none of this file's existing tests exercise WhatsApp
+// dispatch.
 func controlRouter(engine ControlEngine, hub SnapshotBroadcaster) http.Handler {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil)
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil, nil)
 }
 
 // controlRouterWithDispatcher is controlRouter plus a real QuestionDispatcher
-// — used only by the dispatch tests below.
+// — used only by the question-dispatch tests below.
 func controlRouterWithDispatcher(engine ControlEngine, hub SnapshotBroadcaster, dispatcher QuestionDispatcher) http.Handler {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, dispatcher)
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, dispatcher, nil)
+}
+
+// controlRouterWithResultDispatcher is controlRouter plus a real
+// ResultDispatcher — used only by the result-dispatch tests below (story
+// 3.8).
+func controlRouterWithResultDispatcher(engine ControlEngine, hub SnapshotBroadcaster, resultDispatcher ResultDispatcher) http.Handler {
+	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil, resultDispatcher)
 }
 
 func TestOpenLobbySuccessReturnsSnapshotAndBroadcasts(t *testing.T) {
@@ -250,7 +337,7 @@ func TestOpenLobbyForeignOrMissingGameReturns404(t *testing.T) {
 func TestOpenLobbyWithoutSessionReturns401(t *testing.T) {
 	engine := &stubControlEngine{}
 	hub := &stubBroadcaster{}
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+"/open-lobby", nil))
 
@@ -426,7 +513,7 @@ func TestControlActionWithoutSessionReturns401(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &stubControlEngine{}
 			hub := &stubBroadcaster{}
-			router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil)
+			router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil, nil)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+tc.path, nil))
 
@@ -571,9 +658,11 @@ func TestStartGameDispatchSkippedOnRecipientsError(t *testing.T) {
 }
 
 func TestOtherControlActionsNeverDispatch(t *testing.T) {
-	// CloseQuestion/Reveal/StopGame don't accept a dispatcher param at all,
-	// so dispatchQuestionOpened is never reached from these handlers — true
-	// by construction. The snapshot below carries a non-nil CurrentQuestion,
+	// CloseQuestion/StopGame don't accept a QuestionDispatcher param at all
+	// (Reveal now accepts a different one, ResultDispatcher — see the
+	// "Result dispatch" block below), so dispatchQuestionOpened is never
+	// reached from these handlers — true by construction. The snapshot below
+	// carries a non-nil CurrentQuestion,
 	// matching what buildSnapshot really produces once
 	// CurrentQuestionPosition > 0 regardless of state, so this test cannot
 	// pass by accident of a nil-CurrentQuestion guard alone — it is
@@ -591,5 +680,147 @@ func TestOtherControlActionsNeverDispatch(t *testing.T) {
 	}
 	if calls := dispatcher.Calls(); len(calls) != 0 {
 		t.Errorf("DispatchQuestionOpened called %d times, want 0 for /close-question", len(calls))
+	}
+}
+
+// --- Result dispatch (story 3.8) ---
+
+func TestRevealDispatchesResultsToResultDispatcher(t *testing.T) {
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	wantResults := []game.PersonalResult{
+		{Phone: "+972500000001", IsCorrect: true, BasePoints: 100, BonusPoints: 50, Rank: 1},
+	}
+	engine := &stubControlEngine{
+		revealSnapshot: game.Snapshot{GameID: testGameID, State: "revealed", CurrentQuestion: &question},
+		revealPosition: 1,
+		resultsForRevealedQuestionResult: game.RevealedQuestionResults{
+			Results: wantResults, CorrectAnswer: "2", IsLastQuestion: false,
+		},
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubResultDispatcher{done: make(chan struct{}, 1)}
+	rec := httptest.NewRecorder()
+	controlRouterWithResultDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/reveal", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /reveal = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, dispatcher.done)
+
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("DispatchAnswerRevealed called %d times, want 1", len(calls))
+	}
+	call := calls[0]
+	if call.gameID != testGameID || call.correctAnswerText != "2" || call.isLastQuestion || len(call.results) != 1 || call.results[0] != wantResults[0] {
+		t.Errorf("dispatch call = %+v, want gameID=%s correctAnswerText=2 isLastQuestion=false results=%+v", call, testGameID, wantResults)
+	}
+	if got := engine.ResultsForRevealedQuestionPosition(); got != 1 {
+		t.Errorf("ResultsForRevealedQuestion called with position %d, want 1 (Reveal's own returned position)", got)
+	}
+}
+
+// The dispatch binds to Reveal's returned position, not to the snapshot,
+// so a degraded snapshot (emptySnapshot: State "revealed", nil
+// CurrentQuestion — what snapshotAfterCommit returns when buildSnapshot
+// fails) must still deliver everyone's results. Before the story 3.8 code
+// review this input silently dropped the entire fan-out, permanently,
+// since Reveal refuses to run again from the revealed state.
+func TestRevealDispatchesResultsWhenSnapshotDegradedToNilCurrentQuestion(t *testing.T) {
+	wantResults := []game.PersonalResult{
+		{Phone: "+972500000001", IsCorrect: false, Rank: 4},
+	}
+	engine := &stubControlEngine{
+		revealSnapshot: game.Snapshot{GameID: testGameID, State: "revealed", CurrentQuestion: nil},
+		revealPosition: 3,
+		resultsForRevealedQuestionResult: game.RevealedQuestionResults{
+			Results: wantResults, CorrectAnswer: "ירושלים", IsLastQuestion: true,
+		},
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubResultDispatcher{done: make(chan struct{}, 1)}
+	rec := httptest.NewRecorder()
+	controlRouterWithResultDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/reveal", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /reveal = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, dispatcher.done)
+
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("DispatchAnswerRevealed called %d times, want 1 even with a degraded snapshot", len(calls))
+	}
+	if got := engine.ResultsForRevealedQuestionPosition(); got != 3 {
+		t.Errorf("ResultsForRevealedQuestion called with position %d, want 3 (Reveal's returned position, not the nil snapshot's)", got)
+	}
+}
+
+// position 0 is what Reveal returns on its error paths; the handler
+// returns before dispatching in that case, but the guard is the last line
+// of defence against dispatching results for a question nobody identified.
+func TestRevealDispatchSkippedWhenPositionUnset(t *testing.T) {
+	engine := &stubControlEngine{
+		revealSnapshot: game.Snapshot{GameID: testGameID, State: "revealed", CurrentQuestion: nil},
+		revealPosition: 0,
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubResultDispatcher{}
+	rec := httptest.NewRecorder()
+	controlRouterWithResultDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/reveal", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /reveal = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	if got := engine.ResultsForRevealedQuestionRequestedFor(); len(got) != 0 {
+		t.Errorf("ResultsForRevealedQuestion called %d times, want 0 when the revealed position is unset", len(got))
+	}
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchAnswerRevealed called %d times, want 0 when the revealed position is unset", len(calls))
+	}
+}
+
+func TestRevealDispatchSkippedOnResultsError(t *testing.T) {
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	engine := &stubControlEngine{
+		revealSnapshot:                 game.Snapshot{GameID: testGameID, State: "revealed", CurrentQuestion: &question},
+		revealPosition:                 1,
+		resultsForRevealedQuestionErr:  errors.New("db down"),
+		resultsForRevealedQuestionDone: make(chan struct{}, 1),
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubResultDispatcher{}
+	rec := httptest.NewRecorder()
+	controlRouterWithResultDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/reveal", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /reveal = %d, want 200 even when result resolution fails (already-committed transition)", rec.Code)
+	}
+	waitForSignal(t, engine.resultsForRevealedQuestionDone)
+
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchAnswerRevealed called %d times, want 0 when ResultsForRevealedQuestion errors", len(calls))
+	}
+}
+
+func TestOtherControlActionsNeverDispatchResults(t *testing.T) {
+	// CloseQuestion/StartGame/NextQuestion/StopGame don't accept a
+	// ResultDispatcher param at all — true by construction, since only
+	// handleReveal does.
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	engine := &stubControlEngine{closeQuestionSnapshot: game.Snapshot{GameID: testGameID, State: "question_closed", CurrentQuestion: &question}}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubResultDispatcher{}
+	rec := httptest.NewRecorder()
+	controlRouterWithResultDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/close-question", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /close-question = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchAnswerRevealed called %d times, want 0 for /close-question", len(calls))
+	}
+	if got := engine.ResultsForRevealedQuestionRequestedFor(); len(got) != 0 {
+		t.Errorf("ResultsForRevealedQuestion called %d times, want 0 for /close-question", len(got))
 	}
 }

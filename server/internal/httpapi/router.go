@@ -32,7 +32,10 @@ type Pinger interface {
 // mounted at /ws like webhook — nil omits that branch too. dispatcher is
 // independently nilable — it only affects whether /start and /next-question
 // also dispatch WhatsApp Question messages, never whether any route exists.
-func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, webhook http.Handler, engine ControlEngine, hub SnapshotBroadcaster, wsHandler http.Handler, dispatcher QuestionDispatcher) http.Handler {
+// resultDispatcher is independently nilable the same way — it only affects
+// whether /reveal also dispatches WhatsApp personal-result messages, never
+// whether any route exists.
+func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, webhook http.Handler, engine ControlEngine, hub SnapshotBroadcaster, wsHandler http.Handler, dispatcher QuestionDispatcher, resultDispatcher ResultDispatcher) http.Handler {
 	r := chi.NewRouter()
 
 	if webhook != nil {
@@ -76,7 +79,7 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, we
 						gr.Post("/open-lobby", handleOpenLobby(engine, hub))
 						gr.Post("/start", handleStartGame(engine, hub, dispatcher))
 						gr.Post("/close-question", handleCloseQuestion(engine, hub))
-						gr.Post("/reveal", handleReveal(engine, hub))
+						gr.Post("/reveal", handleReveal(engine, hub, resultDispatcher))
 						gr.Post("/next-question", handleNextQuestion(engine, hub, dispatcher))
 						gr.Post("/stop", handleStopGame(engine, hub))
 					}

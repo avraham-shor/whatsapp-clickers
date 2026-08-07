@@ -232,6 +232,45 @@ FROM (
 ) AS v
 WHERE a.id = v.id AND a.points_awarded IS NULL;
 
+-- Per-answer results for gameID's just-revealed question (story 3.8) —
+-- the WhatsApp personal-result dispatch's data source (FR-6). Read only
+-- after Reveal's transaction has committed
+-- (game.Engine.ResultsForRevealedQuestion, called from
+-- httpapi/control.go's post-response goroutine, mirroring
+-- dispatchQuestionOpened's placement, story 3.2): is_correct is
+-- guaranteed non-NULL by Reveal's own pre-check
+-- (CountUngradedAnswersForCurrentQuestion == 0 before the transaction
+-- runs), and points_awarded is guaranteed non-NULL because
+-- RevealCurrentQuestionAndAwardPoints (story 3.7) writes it inside the
+-- same transaction that flips the game to revealed (migration 00014's
+-- NULL convention) — so both are read via `.Bool`/`.Int32` without a
+-- `.Valid` check downstream, same posture as ListAnswersForScoring's
+-- is_correct.
+--
+-- The ORDER BY q.created_at / LIMIT 1 subquery resolves (game_id,
+-- position) to exactly ONE question, identically to ListAnswersForScoring
+-- above and for exactly the same reason: 00003 deliberately declines
+-- UNIQUE (game_id, position), so a plain join on q.position returns the
+-- union of every question sharing that position. Only one of those was
+-- ever scored (ListAnswersForScoring resolves the same single question),
+-- so the others' answer rows still carry points_awarded IS NULL — which
+-- reads as 0 through `.Int32` and would send a participant a confident
+-- grade for a question that was never revealed. Unlike the scoring path,
+-- this one's output is an outbound WhatsApp message: unrecoverable once
+-- sent. Code review finding, story 3.8 (the 3.7 review installed the
+-- identical mitigation on ListAnswersForScoring; this query shipped
+-- without it).
+-- name: ListAnswerResultsForQuestion :many
+SELECT a.participant_id, p.phone, a.is_correct, a.points_awarded
+FROM answers a
+JOIN participants p ON p.id = a.participant_id
+WHERE a.question_id = (
+    SELECT q.id FROM questions q
+    WHERE q.game_id = sqlc.arg(game_id) AND q.position = sqlc.arg(position)
+    ORDER BY q.created_at
+    LIMIT 1
+);
+
 -- Cumulative per-participant score (FR-17/18) — sums points_awarded
 -- across every revealed Question's answers; points_awarded IS NOT NULL
 -- is exactly "this answer's Question has been revealed" (see migration

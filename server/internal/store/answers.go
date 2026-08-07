@@ -203,3 +203,29 @@ func (s *Store) GetLeaderboard(ctx context.Context, gameID string) ([]Participan
 	}
 	return out, nil
 }
+
+// AnswerResultRow is one answering Participant's phone/correctness/points
+// for a just-revealed question — game.Engine.ResultsForRevealedQuestion's
+// raw input (story 3.8, FR-6).
+type AnswerResultRow struct {
+	ParticipantID string
+	Phone         string
+	IsCorrect     bool
+	Points        int32
+}
+
+// ListAnswerResultsForQuestion returns gameID's question-at-position
+// answers, one row per answering Participant, in no particular order —
+// game.Engine.ResultsForRevealedQuestion does its own leaderboard-based
+// rank lookup per participant.
+func (s *Store) ListAnswerResultsForQuestion(ctx context.Context, gameID string, position int32) ([]AnswerResultRow, error) {
+	rows, err := s.q.ListAnswerResultsForQuestion(ctx, gen.ListAnswerResultsForQuestionParams{GameID: gameID, Position: position})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AnswerResultRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, AnswerResultRow{ParticipantID: r.ParticipantID, Phone: r.Phone, IsCorrect: r.IsCorrect.Bool, Points: r.PointsAwarded.Int32})
+	}
+	return out, nil
+}
