@@ -69,7 +69,7 @@ func decodeErrorCode(t *testing.T, body []byte) string {
 }
 
 func TestHealthOK(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
 
@@ -89,7 +89,7 @@ func TestHealthOK(t *testing.T) {
 }
 
 func TestHealthDBDown(t *testing.T) {
-	router := NewRouter(stubPinger{err: errors.New("connection refused")}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{err: errors.New("connection refused")}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
 
@@ -111,7 +111,7 @@ func TestHealthDBDown(t *testing.T) {
 }
 
 func TestSPARootServesIndex(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -124,7 +124,7 @@ func TestSPARootServesIndex(t *testing.T) {
 }
 
 func TestSPAStaticAssetServed(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
 
@@ -137,7 +137,7 @@ func TestSPAStaticAssetServed(t *testing.T) {
 }
 
 func TestSPAClientRouteFallsBackToIndex(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/display/abc123", nil))
 
@@ -150,7 +150,7 @@ func TestSPAClientRouteFallsBackToIndex(t *testing.T) {
 }
 
 func TestMissingAssetReturns404(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-OLDHASH.js", nil))
 
@@ -163,7 +163,7 @@ func TestMissingAssetReturns404(t *testing.T) {
 }
 
 func TestMethodNotAllowedReturnsJSONError(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/health", nil))
 
@@ -184,7 +184,7 @@ func TestMethodNotAllowedReturnsJSONError(t *testing.T) {
 }
 
 func TestUnknownAPIRouteReturnsJSONError(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	for _, path := range []string{"/api/nope", "/ws", "/webhooks/whatsapp"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -209,7 +209,7 @@ func TestUnknownAPIRouteReturnsJSONError(t *testing.T) {
 }
 
 func TestNilStaticReturns404ForSPARoutes(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), nil, nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), nil, nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -223,7 +223,7 @@ func TestLoginSuccessSetsCookieAndReturnsOrganizer(t *testing.T) {
 		loginToken: "raw-token-value",
 		loginOrg:   auth.Organizer{ID: "org-1", Username: "avraham"},
 	}
-	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
 		strings.NewReader(`{"username":"avraham","password":"pw"}`))
@@ -261,7 +261,7 @@ func TestLoginSuccessSetsCookieAndReturnsOrganizer(t *testing.T) {
 
 func TestLoginBadCredentialsReturns401Envelope(t *testing.T) {
 	svc := &stubAuth{loginErr: auth.ErrInvalidCredentials}
-	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
 		strings.NewReader(`{"username":"avraham","password":"wrong"}`))
@@ -279,7 +279,7 @@ func TestLoginBadCredentialsReturns401Envelope(t *testing.T) {
 }
 
 func TestLoginMalformedBodyReturns400(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	for name, body := range map[string]string{
 		"not json":       "not-json",
 		"empty":          "",
@@ -300,7 +300,7 @@ func TestLoginMalformedBodyReturns400(t *testing.T) {
 }
 
 func TestLoginBodyTooLargeReturns413(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	// Valid JSON shape, but padded past the 4 KiB body cap.
 	body := `{"username":"avraham","password":"` + strings.Repeat("x", 8192) + `"}`
@@ -335,7 +335,7 @@ func TestLoginFailureCausesMapToDistinctCodes(t *testing.T) {
 		},
 	} {
 		svc := &stubAuth{loginErr: tc.err}
-		router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+		router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
 			strings.NewReader(`{"username":"avraham","password":"pw"}`))
@@ -352,7 +352,7 @@ func TestLoginFailureCausesMapToDistinctCodes(t *testing.T) {
 }
 
 func TestMeWithoutCookieReturns401Envelope(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
 
@@ -366,7 +366,7 @@ func TestMeWithoutCookieReturns401Envelope(t *testing.T) {
 
 func TestMeWithValidCookieReturnsOrganizer(t *testing.T) {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req.AddCookie(&http.Cookie{Name: "wc_session", Value: "raw-token-value"})
@@ -390,7 +390,7 @@ func TestMeWithValidCookieReturnsOrganizer(t *testing.T) {
 func TestExpiredSessionReturns401(t *testing.T) {
 	// The SQL lookup filters expired rows, so auth reports ErrNoSession.
 	svc := &stubAuth{authErr: auth.ErrNoSession}
-	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req.AddCookie(&http.Cookie{Name: "wc_session", Value: "stale-token"})
@@ -406,7 +406,7 @@ func TestExpiredSessionReturns401(t *testing.T) {
 
 func TestLogoutDeletesSessionAndClearsCookie(t *testing.T) {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "wc_session", Value: "raw-token-value"})
@@ -441,7 +441,7 @@ func TestLogoutFailureStillClearsCookie(t *testing.T) {
 		authOrg:   auth.Organizer{ID: "org-1", Username: "avraham"},
 		logoutErr: errors.New("connection refused"),
 	}
-	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "wc_session", Value: "raw-token-value"})
@@ -463,7 +463,7 @@ func TestLogoutFailureStillClearsCookie(t *testing.T) {
 }
 
 func TestLogoutWithoutSessionReturns401(t *testing.T) {
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil))
 
@@ -474,7 +474,7 @@ func TestLogoutWithoutSessionReturns401(t *testing.T) {
 
 func TestHealthStaysPublic(t *testing.T) {
 	// Health must never sit behind RequireOrganizer (Railway monitoring).
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
 
@@ -499,7 +499,7 @@ func (h *stubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func TestWebhookMountedOutsideAPINoSessionRequired(t *testing.T) {
 	webhook := &stubWebhookHandler{}
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), webhook, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), webhook, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=1", nil)
 	// Deliberately no session cookie — proves mounting + no auth middleware.
@@ -517,7 +517,7 @@ func TestWebhookMountedOutsideAPINoSessionRequired(t *testing.T) {
 func TestNilWebhookOmitsBranch(t *testing.T) {
 	// nil webhook (most tests, and any deployment shape without it) must
 	// not panic and must fall through to the existing SPA/API behavior.
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/webhooks/whatsapp", nil))
 
@@ -533,7 +533,7 @@ func TestNilEngineOrHubOmitsOpenLobbyRouteWithoutPanicking(t *testing.T) {
 	// against such a router must not panic on a nil interface call — with
 	// the route unregistered, chi's own NotFoundHandler answers instead.
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/open-lobby", ""))
 
@@ -544,7 +544,7 @@ func TestNilEngineOrHubOmitsOpenLobbyRouteWithoutPanicking(t *testing.T) {
 
 func TestAPIBehaviorUnchangedWithWebhookMounted(t *testing.T) {
 	// Mounting the webhook branch must not disturb existing /api routing.
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), &stubWebhookHandler{}, nil, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), &stubWebhookHandler{}, nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
 

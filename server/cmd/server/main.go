@@ -189,7 +189,8 @@ func run(logger *slog.Logger) error {
 	// st satisfies game.Store (GetGameForOrganizer, OpenGameLobby, ListParticipants,
 	// GetGameByJoinCode, CreateParticipant, UpdateParticipantNameByPhone,
 	// ListQuestionsByGame, StartGameFirstQuestion, CloseCurrentQuestion,
-	// RevealCurrentQuestion, OpenNextQuestion, FinishGame, UpdateAnswerGrade).
+	// RevealCurrentQuestion, OpenNextQuestion, FinishGame, UpdateAnswerGrade,
+	// ListAnswerResultsForQuestion).
 	// The AI-grading concurrency cap is NewEngine's default
 	// (game.DefaultMaxConcurrentAIGrades); WithMaxConcurrentAIGrades exists
 	// to tune or shrink it, and production has no reason to.
@@ -204,9 +205,10 @@ func run(logger *slog.Logger) error {
 	// dispatcher already satisfies wa.Replier, exactly like inboundRouter's
 	// construction above reuses it.
 	questionNotifier := wa.NewQuestionNotifier(dispatcher, logger)
+	resultNotifier := wa.NewResultNotifier(dispatcher, logger)
 
 	// st satisfies both Pinger and GameStore.
-	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler, questionNotifier)
+	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler, questionNotifier, resultNotifier)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

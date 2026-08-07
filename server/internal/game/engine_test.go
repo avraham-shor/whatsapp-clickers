@@ -78,6 +78,9 @@ type stubStore struct {
 	getLeaderboardResult []store.ParticipantScore
 	getLeaderboardErr    error
 
+	listAnswerResultsForQuestionResult []store.AnswerResultRow
+	listAnswerResultsForQuestionErr    error
+
 	openNextQuestionResult   gen.Game
 	openNextQuestionErr      error
 	openNextQuestionCalls    int
@@ -192,6 +195,10 @@ func (s *stubStore) ListAnswersForScoring(ctx context.Context, gameID string, po
 
 func (s *stubStore) GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error) {
 	return s.getLeaderboardResult, s.getLeaderboardErr
+}
+
+func (s *stubStore) ListAnswerResultsForQuestion(ctx context.Context, gameID string, position int32) ([]store.AnswerResultRow, error) {
+	return s.listAnswerResultsForQuestionResult, s.listAnswerResultsForQuestionErr
 }
 
 func (s *stubStore) OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error) {
@@ -390,7 +397,7 @@ func TestSnapshotAfterCommitDegradesWithNonNilLeaderboard(t *testing.T) {
 	st.listQuestionsByGameErr = errors.New("questions unavailable")
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	snap, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	snap, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if err != nil {
 		t.Fatalf("Reveal() err = %v, want nil (a failed snapshot build must not fail the committed transition)", err)
 	}
@@ -408,7 +415,7 @@ func TestRevealPropagatesListAnswersForScoringError(t *testing.T) {
 	st.listAnswersForScoringErr = boom
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	_, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if !errors.Is(err, boom) {
 		t.Fatalf("Reveal() err = %v, want the store error propagated unwrapped", err)
 	}
@@ -678,7 +685,7 @@ func TestRevealFromQuestionClosedReturnsRevealedSnapshot(t *testing.T) {
 	st := questionClosedStub()
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	snap, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	snap, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if err != nil {
 		t.Fatalf("Reveal() err = %v, want nil", err)
 	}
@@ -695,7 +702,7 @@ func TestRevealFromNonQuestionClosedReturnsErrNotQuestionClosedWithoutWriting(t 
 	st.game.State = StateQuestionOpen
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	_, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if !errors.Is(err, ErrNotQuestionClosed) {
 		t.Fatalf("Reveal() err = %v, want ErrNotQuestionClosed", err)
 	}
@@ -709,7 +716,7 @@ func TestRevealRaceLossReturnsErrNotQuestionClosed(t *testing.T) {
 	st.revealCurrentQuestionAndAwardPointsErr = store.ErrNotFound
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	_, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if !errors.Is(err, ErrNotQuestionClosed) {
 		t.Fatalf("Reveal() err = %v, want ErrNotQuestionClosed (race loss reinterpreted)", err)
 	}
@@ -720,7 +727,7 @@ func TestRevealSucceedsWhenNoOutstandingGrades(t *testing.T) {
 	st.countUngradedAnswersForCurrentQuestionResult = 0
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	snap, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	snap, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if err != nil {
 		t.Fatalf("Reveal() err = %v, want nil", err)
 	}
@@ -740,7 +747,7 @@ func TestRevealReturnsErrGradingIncompleteWhenOutstandingGradesExist(t *testing.
 	st.countUngradedAnswersForCurrentQuestionResult = 1
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	_, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if !errors.Is(err, ErrGradingIncomplete) {
 		t.Fatalf("Reveal() err = %v, want ErrGradingIncomplete", err)
 	}
@@ -755,7 +762,7 @@ func TestRevealPropagatesCountUngradedAnswersError(t *testing.T) {
 	st.countUngradedAnswersForCurrentQuestionErr = boom
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	_, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	// errors.Is against the injected sentinel, not merely "some error that
 	// isn't one of ours" — the weaker form passed for any newly-introduced
 	// third sentinel (3.2's review precedent, and this story's Task 4).
@@ -781,7 +788,7 @@ func TestRevealComputesAndPersistsSpeedBonusPoints(t *testing.T) {
 	st.listAnswersForScoringResult = answers
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
+	_, _, err := e.Reveal(context.Background(), testGameID, testOrganizerID)
 	if err != nil {
 		t.Fatalf("Reveal() err = %v, want nil", err)
 	}

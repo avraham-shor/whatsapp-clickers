@@ -64,6 +64,7 @@ type Store interface {
 	ListAnswersForScoring(ctx context.Context, gameID string, position int32) ([]store.AnswerForScoring, error)
 	RevealCurrentQuestionAndAwardPoints(ctx context.Context, gameID, organizerID string, points []store.AnswerPointsParams) (gen.Game, error)
 	GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error)
+	ListAnswerResultsForQuestion(ctx context.Context, gameID string, position int32) ([]store.AnswerResultRow, error)
 	OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error)
 	FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error)
@@ -263,31 +264,44 @@ func (e *Engine) CloseQuestion(ctx context.Context, gameID, organizerID string) 
 }
 
 // Reveal transitions gameID from question_closed to revealed and returns
-// the resulting snapshot. A game not currently question_closed (including
-// one that lost a concurrent transition race) is ErrNotQuestionClosed; a
-// missing/foreign game is store.ErrNotFound; a question_closed game with
-// outstanding ungraded answers is ErrGradingIncomplete (FR-16 epic AC-3).
+// the resulting snapshot plus the position of the question it just
+// revealed. A game not currently question_closed (including one that lost
+// a concurrent transition race) is ErrNotQuestionClosed; a missing/foreign
+// game is store.ErrNotFound; a question_closed game with outstanding
+// ungraded answers is ErrGradingIncomplete (FR-16 epic AC-3).
 // It also computes and persists Speed Bonus scoring for the revealed
 // question (FR-17, story 3.7).
-func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
+//
+// The returned position comes from the committed game row, NOT from the
+// returned Snapshot. Callers that dispatch per-participant results off
+// this transition (httpapi's dispatchAnswerRevealed) must bind to it
+// rather than to snapshot.CurrentQuestion.Position: snapshotAfterCommit
+// degrades to emptySnapshot on any buildSnapshot failure, and
+// emptySnapshot carries State = "revealed" with a nil CurrentQuestion —
+// so a caller reading the position off the snapshot loses the entire
+// result fan-out on a transient read error, permanently, because Reveal
+// refuses to run again from the revealed state (code review, story 3.8).
+// On the error paths the position is returned as 0, which no caller
+// should read: the error is the signal.
+func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapshot, int32, error) {
 	g, err := e.store.GetGameForOrganizer(ctx, gameID, organizerID)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, 0, err
 	}
 	if g.State != StateQuestionClosed {
-		return Snapshot{}, ErrNotQuestionClosed
+		return Snapshot{}, 0, ErrNotQuestionClosed
 	}
 	outstanding, err := e.store.CountUngradedAnswersForCurrentQuestion(ctx, gameID)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, 0, err
 	}
 	if outstanding > 0 {
-		return Snapshot{}, ErrGradingIncomplete
+		return Snapshot{}, 0, ErrGradingIncomplete
 	}
 
 	answers, err := e.store.ListAnswersForScoring(ctx, gameID, g.CurrentQuestionPosition)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, 0, err
 	}
 	cfg := ScoringConfig{
 		PointsPerCorrect: g.PointsPerCorrect,
@@ -328,11 +342,15 @@ func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapsh
 			// after the wrong problem — that is still true and still not
 			// done. Deferred at 3.7's code review; revisit whenever this
 			// path next changes.
-			return Snapshot{}, ErrNotQuestionClosed
+			return Snapshot{}, 0, ErrNotQuestionClosed
 		}
-		return Snapshot{}, err
+		return Snapshot{}, 0, err
 	}
-	return e.snapshotAfterCommit(ctx, g), nil
+	// g is the committed post-reveal row. Reveal never advances
+	// current_question_position (NextQuestion is the only thing that
+	// does), so this IS the position just revealed — and unlike the
+	// snapshot below, it survives a degraded snapshot build.
+	return e.snapshotAfterCommit(ctx, g), g.CurrentQuestionPosition, nil
 }
 
 // NextQuestion transitions gameID from revealed to question_open on the

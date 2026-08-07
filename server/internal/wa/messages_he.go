@@ -26,10 +26,10 @@ package wa
 //	Format hint (MCQ)        -> story 3.3 (below)
 //	Too long (Free-Text)     -> story 3.3 (below)
 //	Question closed          -> story 3.3 (below)
-//	Result - correct         -> story 3.8
-//	Result - correct + bonus -> story 3.8
-//	Result - wrong           -> story 3.8
-//	Result - wrong, last     -> story 3.8
+//	Result - correct         -> story 3.8 (below)
+//	Result - correct + bonus -> story 3.8 (below)
+//	Result - wrong           -> story 3.8 (below)
+//	Result - wrong, last     -> story 3.8 (below)
 //	Final results            -> story 3.9
 //	Winner's final message   -> story 3.9
 //
@@ -216,4 +216,49 @@ const msgQuestionClosed = "השאלה נסגרה — מתכוננים לשאלה
 
 func questionClosedMessage() string {
 	return msgQuestionClosed
+}
+
+// msgResultCorrectTemplate is the Result — correct row (no Speed Bonus).
+const msgResultCorrectTemplate = "נכון! 🎉 +%s נקודות\nמקום %s בטבלה"
+
+// resultCorrectMessage returns the finished Result-correct copy. points
+// is the Game's configured points-per-correct-answer (no bonus); rank is
+// the Participant's post-reveal cumulative Leaderboard rank.
+func resultCorrectMessage(points int32, rank int) string {
+	return fmt.Sprintf(msgResultCorrectTemplate, ltr(strconv.Itoa(int(points))), ltr(strconv.Itoa(rank)))
+}
+
+// msgResultCorrectBonusTemplate is the Result — correct + bonus row. Two
+// emoji (🎉 and ⚡) are allowed here — the templates table's stated
+// exception for winner/final-results/speed-bonus messages (EXPERIENCE.md
+// A20); every other row in this file stays at one.
+const msgResultCorrectBonusTemplate = "נכון! 🎉 +%s נקודות\n⚡ בונוס מהירות +%s\nמקום %s בטבלה"
+
+// resultCorrectBonusMessage returns the finished Result-correct-with-bonus
+// copy. basePoints is points-per-correct-answer; bonusPoints is the
+// Speed Bonus component alone — shown as two separate numbers, never
+// their sum.
+func resultCorrectBonusMessage(basePoints, bonusPoints int32, rank int) string {
+	return fmt.Sprintf(msgResultCorrectBonusTemplate, ltr(strconv.Itoa(int(basePoints))), ltr(strconv.Itoa(int(bonusPoints))), ltr(strconv.Itoa(rank)))
+}
+
+// msgResultWrongTemplate is the Result — wrong row for every question
+// except the game's last (EXPERIENCE.md A5's "עוד הכול פתוח" closing
+// line). correctAnswer is inserted raw, NOT isolated: it is Hebrew
+// content (an Accepted Answer or MCQ option text), the same treatment
+// questionMCQMessage/questionFreeTextMessage give the question text
+// itself — content, not an LTR token like a code or digit.
+const msgResultWrongTemplate = "לא נכון הפעם. התשובה: %s\nמקום %s בטבלה — עוד הכול פתוח!"
+
+func resultWrongMessage(correctAnswer string, rank int) string {
+	return fmt.Sprintf(msgResultWrongTemplate, correctAnswer, ltr(strconv.Itoa(rank)))
+}
+
+// msgResultWrongLastTemplate is the Result — wrong, last-question row:
+// the same content as msgResultWrongTemplate minus "עוד הכול פתוח"
+// (EXPERIENCE.md A5 — there is no more game left to stay open about).
+const msgResultWrongLastTemplate = "לא נכון הפעם. התשובה: %s\nמקום %s בטבלה"
+
+func resultWrongLastMessage(correctAnswer string, rank int) string {
+	return fmt.Sprintf(msgResultWrongLastTemplate, correctAnswer, ltr(strconv.Itoa(rank)))
 }

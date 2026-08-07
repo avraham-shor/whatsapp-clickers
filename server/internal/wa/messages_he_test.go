@@ -13,18 +13,22 @@ import (
 // comparison, so an editor mangling the mixed-direction literal fails the
 // build instead of shipping scrambled Hebrew.
 const (
-	canonicalWelcomeCopy          = "היי %s, נרשמת! 🎉 השאירו את הצ'אט הזה פתוח — השאלות יגיעו לכאן. (לא %s? שלחו לדוגמה — שם: רחל לוי)"
-	canonicalPreLobbyCopy         = "הקוד נכון! ההרשמה עוד לא נפתחה — שלחו שוב את ההודעה כשהמארגן מכריז שמתחילים."
-	canonicalInvalidCodeCopy      = "הקוד %s לא נמצא. בדקו את הקוד עם המארגן ושלחו שוב: %s ואחריו הקוד."
-	canonicalNameUpdatedCopy      = "עודכן ✓ מעכשיו: %s"
-	canonicalSpectatorNoticeCopy  = "המשחק כבר התחיל! נרשמת כצופה — התוצאות יגיעו לכאן בסוף המשחק 🏆"
-	canonicalQuestionMCQCopy      = "שאלה %s מתוך %s:\n%s\nא. %s\nב. %s\nג. %s\nד. %s\nהשיבו באות (א–ד) או בספרה (%s) — יש לכם %s שניות!"
-	canonicalQuestionFreeTextCopy = "שאלה %s מתוך %s:\n%s\nכתבו את התשובה בהודעה — יש לכם %s שניות!"
-	canonicalAcknowledgmentCopy   = "התקבל ✓ — בהצלחה!"
-	canonicalAlreadyAnsweredCopy  = "כבר ענית ✓ התשובה הראשונה היא שקובעת."
-	canonicalFormatHintCopy       = "כדי לענות שלחו אות (א–ד) או ספרה (%s) — עוד יש זמן!"
-	canonicalTooLongCopy          = "התשובה ארוכה מדי — עד %s תווים. שלחו שוב, בקצרה!"
-	canonicalQuestionClosedCopy   = "השאלה נסגרה — מתכוננים לשאלה הבאה!"
+	canonicalWelcomeCopy            = "היי %s, נרשמת! 🎉 השאירו את הצ'אט הזה פתוח — השאלות יגיעו לכאן. (לא %s? שלחו לדוגמה — שם: רחל לוי)"
+	canonicalPreLobbyCopy           = "הקוד נכון! ההרשמה עוד לא נפתחה — שלחו שוב את ההודעה כשהמארגן מכריז שמתחילים."
+	canonicalInvalidCodeCopy        = "הקוד %s לא נמצא. בדקו את הקוד עם המארגן ושלחו שוב: %s ואחריו הקוד."
+	canonicalNameUpdatedCopy        = "עודכן ✓ מעכשיו: %s"
+	canonicalSpectatorNoticeCopy    = "המשחק כבר התחיל! נרשמת כצופה — התוצאות יגיעו לכאן בסוף המשחק 🏆"
+	canonicalQuestionMCQCopy        = "שאלה %s מתוך %s:\n%s\nא. %s\nב. %s\nג. %s\nד. %s\nהשיבו באות (א–ד) או בספרה (%s) — יש לכם %s שניות!"
+	canonicalQuestionFreeTextCopy   = "שאלה %s מתוך %s:\n%s\nכתבו את התשובה בהודעה — יש לכם %s שניות!"
+	canonicalAcknowledgmentCopy     = "התקבל ✓ — בהצלחה!"
+	canonicalAlreadyAnsweredCopy    = "כבר ענית ✓ התשובה הראשונה היא שקובעת."
+	canonicalFormatHintCopy         = "כדי לענות שלחו אות (א–ד) או ספרה (%s) — עוד יש זמן!"
+	canonicalTooLongCopy            = "התשובה ארוכה מדי — עד %s תווים. שלחו שוב, בקצרה!"
+	canonicalQuestionClosedCopy     = "השאלה נסגרה — מתכוננים לשאלה הבאה!"
+	canonicalResultCorrectCopy      = "נכון! 🎉 +%s נקודות\nמקום %s בטבלה"
+	canonicalResultCorrectBonusCopy = "נכון! 🎉 +%s נקודות\n⚡ בונוס מהירות +%s\nמקום %s בטבלה"
+	canonicalResultWrongCopy        = "לא נכון הפעם. התשובה: %s\nמקום %s בטבלה — עוד הכול פתוח!"
+	canonicalResultWrongLastCopy    = "לא נכון הפעם. התשובה: %s\nמקום %s בטבלה"
 )
 
 func stripIsolates(s string) string {
@@ -213,5 +217,114 @@ func TestTooLongMessageIsolatesDigitToken(t *testing.T) {
 func TestQuestionClosedMessageMatchesCanonicalCopy(t *testing.T) {
 	if got := questionClosedMessage(); got != canonicalQuestionClosedCopy {
 		t.Errorf("Question-closed copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", got, canonicalQuestionClosedCopy)
+	}
+}
+
+// --- Result - correct ---
+
+func TestResultCorrectMessageMatchesCanonicalCopy(t *testing.T) {
+	stripped := stripIsolates(resultCorrectMessage(100, 1))
+	want := fmt.Sprintf(canonicalResultCorrectCopy, "100", "1")
+	if stripped != want {
+		t.Errorf("Result-correct copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestResultCorrectMessageIsolatesDigitTokens(t *testing.T) {
+	got := resultCorrectMessage(100, 1)
+	for _, token := range []string{"100", "1"} {
+		isolated := lriMark + token + pdiMark
+		if !strings.Contains(got, isolated) {
+			t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", token, got)
+		}
+	}
+}
+
+// --- Result - correct + bonus ---
+
+func TestResultCorrectBonusMessageMatchesCanonicalCopy(t *testing.T) {
+	stripped := stripIsolates(resultCorrectBonusMessage(100, 50, 1))
+	want := fmt.Sprintf(canonicalResultCorrectBonusCopy, "100", "50", "1")
+	if stripped != want {
+		t.Errorf("Result-correct-bonus copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestResultCorrectBonusMessageIsolatesDigitTokens(t *testing.T) {
+	got := resultCorrectBonusMessage(100, 50, 1)
+	for _, token := range []string{"100", "50", "1"} {
+		isolated := lriMark + token + pdiMark
+		if !strings.Contains(got, isolated) {
+			t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", token, got)
+		}
+	}
+}
+
+// --- Result - wrong ---
+
+func TestResultWrongMessageMatchesCanonicalCopy(t *testing.T) {
+	const correctAnswer = "Jerusalem"
+	stripped := stripIsolates(resultWrongMessage(correctAnswer, 3))
+	want := fmt.Sprintf(canonicalResultWrongCopy, correctAnswer, "3")
+	if stripped != want {
+		t.Errorf("Result-wrong copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestResultWrongMessageIsolatesRankToken(t *testing.T) {
+	got := resultWrongMessage("Jerusalem", 3)
+	isolated := lriMark + "3" + pdiMark
+	if !strings.Contains(got, isolated) {
+		t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", "3", got)
+	}
+}
+
+// TestResultWrongMessageDoesNotIsolateCorrectAnswer uses a Latin-script
+// correctAnswer fixture so a missing/wrongly-present isolate would actually
+// be caught — mirrors TestWelcomeMessageIsolatesLTRTokens's reasoning for
+// why a pure-Hebrew fixture wouldn't catch it either way. Per this file's
+// header rule, correctAnswer is content (an Accepted Answer/MCQ option
+// text), not an LTR token like a code or digit, so it must pass through
+// raw, unlike every digit placeholder in this file.
+func TestResultWrongMessageDoesNotIsolateCorrectAnswer(t *testing.T) {
+	const correctAnswer = "Jerusalem"
+	got := resultWrongMessage(correctAnswer, 3)
+	if !strings.Contains(got, correctAnswer) {
+		t.Fatalf("resultWrongMessage(%q, ...) = %q, want it to contain the raw correct answer", correctAnswer, got)
+	}
+	if strings.Contains(got, lriMark+correctAnswer+pdiMark) {
+		t.Errorf("resultWrongMessage(%q, ...) isolates the correct answer, want it passed through raw: %q", correctAnswer, got)
+	}
+}
+
+// --- Result - wrong, last question ---
+
+func TestResultWrongLastMessageMatchesCanonicalCopy(t *testing.T) {
+	const correctAnswer = "Jerusalem"
+	stripped := stripIsolates(resultWrongLastMessage(correctAnswer, 3))
+	want := fmt.Sprintf(canonicalResultWrongLastCopy, correctAnswer, "3")
+	if stripped != want {
+		t.Errorf("Result-wrong-last copy drifted from the EXPERIENCE.md templates table\n got: %q\nwant: %q", stripped, want)
+	}
+}
+
+func TestResultWrongLastMessageIsolatesRankToken(t *testing.T) {
+	got := resultWrongLastMessage("Jerusalem", 3)
+	isolated := lriMark + "3" + pdiMark
+	if !strings.Contains(got, isolated) {
+		t.Errorf("%q is not wrapped in LRI/PDI isolates: %q", "3", got)
+	}
+}
+
+// TestResultWrongLastMessageDoesNotIsolateCorrectAnswer mirrors
+// TestResultWrongMessageDoesNotIsolateCorrectAnswer above.
+func TestResultWrongLastMessageDoesNotIsolateCorrectAnswer(t *testing.T) {
+	const correctAnswer = "Jerusalem"
+	got := resultWrongLastMessage(correctAnswer, 3)
+	if !strings.Contains(got, correctAnswer) {
+		t.Fatalf("resultWrongLastMessage(%q, ...) = %q, want it to contain the raw correct answer", correctAnswer, got)
+	}
+	if strings.Contains(got, lriMark+correctAnswer+pdiMark) {
+		t.Errorf("resultWrongLastMessage(%q, ...) isolates the correct answer, want it passed through raw: %q", correctAnswer, got)
 	}
 }
