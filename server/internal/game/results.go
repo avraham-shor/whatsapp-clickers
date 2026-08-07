@@ -39,8 +39,10 @@ type RevealedQuestionResults struct {
 	// Reveal on the Audience Display stage, Epic 4).
 	CorrectAnswer string
 	// IsLastQuestion is true when the revealed question was the game's
-	// final one — the wrong-answer message drops "עוד הכול פתוח" in
-	// that case (EXPERIENCE.md A5).
+	// final one — the wrong-answer message drops its "it's all still
+	// open" closing line in that case, selecting
+	// msgResultWrongLastTemplate over msgResultWrongTemplate
+	// (wa/messages_he.go; EXPERIENCE.md A5).
 	IsLastQuestion bool
 }
 
@@ -130,10 +132,11 @@ func (e *Engine) ResultsForRevealedQuestion(ctx context.Context, gameID, organiz
 	// exact test NextQuestion uses to decide between OpenNextQuestion and
 	// FinishGame. An earlier version compared position to len(questions),
 	// which silently disagrees with NextQuestion whenever positions are
-	// not a dense 1..N sequence: the room would be told "עוד הכול פתוח"
-	// on the real final question, moments before the game ended. Mirror
-	// the state machine rather than assuming density (code review, story
-	// 3.8).
+	// not a dense 1..N sequence: wrong answerers on the real final
+	// question would get msgResultWrongTemplate — the variant whose
+	// closing line promises the game is still open — moments before the
+	// game ended. Mirror the state machine rather than assuming density
+	// (code review, story 3.8).
 	isLastQuestion := true
 	for _, q := range questions {
 		if q.Position == position+1 {
@@ -164,8 +167,9 @@ func (e *Engine) ResultsForRevealedQuestion(ctx context.Context, gameID, organiz
 				bonus = r.Points - base
 			}
 		}
-		// A map miss would yield rank 0 and put "מקום 0 בטבלה" — a rank
-		// that cannot exist — on a real participant's phone. Every other
+		// A map miss would yield rank 0 and render the Result templates'
+		// rank line as position zero — a rank that cannot exist — on a
+		// real participant's phone. Every other
 		// anomaly in this function fails loudly rather than dispatching
 		// something wrong, and this is the one that reaches a human, so it
 		// does too. Unreachable as the roster stands (GetLeaderboard LEFT
