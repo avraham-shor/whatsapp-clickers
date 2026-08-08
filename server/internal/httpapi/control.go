@@ -20,6 +20,7 @@ type ControlEngine interface {
 	StopGame(ctx context.Context, gameID, organizerID string) (game.Snapshot, error)
 	PlayerRecipients(ctx context.Context, gameID string) ([]string, error)
 	ResultsForRevealedQuestion(ctx context.Context, gameID, organizerID string, position int32) (game.RevealedQuestionResults, error)
+	ResultsForFinishedGame(ctx context.Context, gameID string) (game.FinalResults, error)
 }
 
 // SnapshotBroadcaster is the fan-out surface handleOpenLobby needs;
@@ -42,6 +43,14 @@ type QuestionDispatcher interface {
 // QuestionDispatcher.
 type ResultDispatcher interface {
 	DispatchAnswerRevealed(gameID string, results []game.PersonalResult, correctAnswerText string, isLastQuestion bool)
+}
+
+// FinalDispatcher is the WhatsApp fan-out surface handleNextQuestion and
+// handleStopGame need at game end; *wa.FinalNotifier satisfies it.
+// Consumer-defined here, referencing only game types, so httpapi never
+// imports wa — same posture as QuestionDispatcher/ResultDispatcher.
+type FinalDispatcher interface {
+	DispatchGameFinished(gameID string, results game.FinalResults)
 }
 
 // dispatchQuestionOpened hands the WhatsApp question-opened burst to
@@ -136,6 +145,48 @@ func dispatchAnswerRevealed(ctx context.Context, engine ControlEngine, dispatche
 		return
 	}
 	dispatcher.DispatchAnswerRevealed(gameID, results.Results, results.CorrectAnswer, results.IsLastQuestion)
+}
+
+// dispatchGameFinished hands the WhatsApp game-end burst to dispatcher
+// when snapshot reflects a game that just finished. Spawned as a
+// goroutine after the HTTP response is written (see handleNextQuestion/
+// handleStopGame) — ResultsForFinishedGame is a real DB round trip
+// (roster + leaderboard), and gating the organizer-facing response on it
+// would mean the last "next question" or a "stop" click could visibly
+// stall for up to this function's own timeout (same reasoning as
+// dispatchQuestionOpened, story 3.2).
+//
+// Guards on snapshot.State == game.StateFinished and nothing else.
+// Unlike story 3.8's dispatchAnswerRevealed, this needs no defence
+// against a degraded snapshot: emptySnapshot preserves State = g.State,
+// and State is the ONLY snapshot field this path reads — the whole data
+// set is re-resolved from the DB by ResultsForFinishedGame(gameID). A
+// degraded post-commit snapshot therefore costs this dispatch nothing.
+//
+// Reached from both transitions into finished: NextQuestion past the
+// last question, and StopGame. Neither can fire twice for one game —
+// NextQuestion requires state revealed and StopGame requires
+// question_open/question_closed/revealed, so once a game is finished
+// every route into finished is closed, and finished is terminal. There
+// is no double-dispatch to guard against and no idempotency key needed.
+//
+// Detached from ctx's cancellation with its own bounded timeout — same
+// reasoning as dispatchQuestionOpened/dispatchAnswerRevealed: the
+// transition already committed and its WS snapshot already broadcast by
+// the time this runs, so the organizer's connection closing must not
+// skip delivering the closing message to the whole room.
+func dispatchGameFinished(ctx context.Context, engine ControlEngine, dispatcher FinalDispatcher, gameID string, snapshot game.Snapshot) {
+	if dispatcher == nil || snapshot.State != game.StateFinished {
+		return
+	}
+	dispatchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	results, err := engine.ResultsForFinishedGame(dispatchCtx, gameID)
+	if err != nil {
+		slog.Error("final results dispatch skipped, could not resolve final results", "game_id", gameID, "error", err)
+		return
+	}
+	dispatcher.DispatchGameFinished(gameID, results)
 }
 
 func handleOpenLobby(engine ControlEngine, hub SnapshotBroadcaster) http.HandlerFunc {
@@ -234,7 +285,7 @@ func handleReveal(engine ControlEngine, hub SnapshotBroadcaster, dispatcher Resu
 	}
 }
 
-func handleNextQuestion(engine ControlEngine, hub SnapshotBroadcaster, dispatcher QuestionDispatcher) http.HandlerFunc {
+func handleNextQuestion(engine ControlEngine, hub SnapshotBroadcaster, dispatcher QuestionDispatcher, finalDispatcher FinalDispatcher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		organizerID, ok := requireOrganizer(w, r)
 		if !ok {
@@ -254,11 +305,17 @@ func handleNextQuestion(engine ControlEngine, hub SnapshotBroadcaster, dispatche
 		hub.Broadcast(gameID, snapshot)
 		slog.Info("game advanced", "game_id", gameID, "organizer_id", organizerID, "state", snapshot.State)
 		writeJSON(w, http.StatusOK, snapshot)
+		// The two guards are mutually exclusive (question_open vs
+		// finished) — exactly one of these ever does work. That is the
+		// point, not a redundancy to collapse into an if/else here: the
+		// state guards belong with the dispatch functions, where every
+		// other one in this file lives.
 		go dispatchQuestionOpened(ctx, engine, dispatcher, gameID, snapshot)
+		go dispatchGameFinished(ctx, engine, finalDispatcher, gameID, snapshot)
 	}
 }
 
-func handleStopGame(engine ControlEngine, hub SnapshotBroadcaster) http.HandlerFunc {
+func handleStopGame(engine ControlEngine, hub SnapshotBroadcaster, finalDispatcher FinalDispatcher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		organizerID, ok := requireOrganizer(w, r)
 		if !ok {
@@ -278,5 +335,6 @@ func handleStopGame(engine ControlEngine, hub SnapshotBroadcaster) http.HandlerF
 		hub.Broadcast(gameID, snapshot)
 		slog.Info("game stopped", "game_id", gameID, "organizer_id", organizerID)
 		writeJSON(w, http.StatusOK, snapshot)
+		go dispatchGameFinished(ctx, engine, finalDispatcher, gameID, snapshot)
 	}
 }

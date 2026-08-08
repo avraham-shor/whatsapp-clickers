@@ -30,8 +30,10 @@ package wa
 //	Result - correct + bonus -> story 3.8 (below)
 //	Result - wrong           -> story 3.8 (below)
 //	Result - wrong, last     -> story 3.8 (below)
-//	Final results            -> story 3.9
-//	Winner's final message   -> story 3.9
+//	Final results            -> story 3.9 (below)
+//	Final results - spectator -> story 3.9 (below)
+//	Final results - no winner -> story 3.9 (below)
+//	Winner's final message   -> story 3.9 (below)
 //
 // Voice (UX-DR15): warm-playful, short, gender-neutral (plural imperatives,
 // never the masculine-singular greeting form), symbolic emoji only and at
@@ -42,6 +44,7 @@ package wa
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // renamePrefix is the שם: command prefix inbound.go's parseRenameName
@@ -261,4 +264,115 @@ const msgResultWrongLastTemplate = "לא נכון הפעם. התשובה: %s\nמ
 
 func resultWrongLastMessage(correctAnswer string, rank int) string {
 	return fmt.Sprintf(msgResultWrongLastTemplate, correctAnswer, ltr(strconv.Itoa(rank)))
+}
+
+// joinNames renders one or more display names as a Hebrew list: a single
+// name alone, two joined by the vav conjunction, three or more
+// comma-separated with the conjunction before the last. Every name is
+// ltr()-isolated individually, same reasoning as welcomeMessage: a
+// WhatsApp profile name can legitimately be Latin-script (mixed-language
+// families), and isolating a Hebrew one is harmless.
+//
+// No cap on the number of names. EXPERIENCE.md's A16 "up to three names"
+// is an Audience-Display layout constraint (finite projector space), not
+// a copy rule; a WhatsApp message has no such limit, and truncating the
+// list would drop a real winner's name from the one message that names
+// them.
+//
+// Callers guarantee len(names) > 0 — the no-winner case is a different
+// template entirely (msgFinalResultsNoWinner), selected upstream in
+// FinalNotifier.DispatchGameFinished.
+func joinNames(names []string) string {
+	isolated := make([]string, 0, len(names))
+	for _, n := range names {
+		isolated = append(isolated, ltr(n))
+	}
+	if len(isolated) == 1 {
+		return isolated[0]
+	}
+	last := len(isolated) - 1
+	return strings.Join(isolated[:last], ", ") + nameConjunction + isolated[last]
+}
+
+// nameConjunction is the vav-prefix separator before the final name in a
+// multi-name list, per the templates table's tie forms. It lives here,
+// not inline in joinNames, so every Hebrew fragment in this package stays
+// a named constant in this file.
+const nameConjunction = " ו-"
+
+// msgFinalResultsTemplate is the Final results row for a player when
+// exactly one participant holds first place: the winner line, then the
+// recipient's own placing. Two emoji are permitted on this row
+// (EXPERIENCE.md A20's winner/final-results exception); it uses one.
+const msgFinalResultsTemplate = "המשחק נגמר! 🏆 הזוכה: %s עם %s נקודות.\nסיימת במקום %s עם %s נקודות — כל הכבוד!"
+
+// finalResultsMessage returns the finished Final-results copy for a
+// player. winnerNames must hold exactly one name; winnerScore is the
+// winning cumulative score; rank/score are this recipient's own final
+// placing. A winner receives this too, then the winner variant on top
+// (epic AC-3's "additionally").
+func finalResultsMessage(winnerNames []string, winnerScore int32, rank int, score int32) string {
+	return fmt.Sprintf(msgFinalResultsTemplate,
+		joinNames(winnerNames), ltr(strconv.Itoa(int(winnerScore))),
+		ltr(strconv.Itoa(rank)), ltr(strconv.Itoa(int(score))))
+}
+
+// msgFinalResultsTieTemplate is the Final results row's tie form: the
+// plural winner noun, all tied names joined (EXPERIENCE.md A16). The
+// score appears once — it is by definition the same for every tied
+// winner.
+const msgFinalResultsTieTemplate = "המשחק נגמר! 🏆 הזוכים: %s עם %s נקודות.\nסיימת במקום %s עם %s נקודות — כל הכבוד!"
+
+func finalResultsTieMessage(winnerNames []string, winnerScore int32, rank int, score int32) string {
+	return fmt.Sprintf(msgFinalResultsTieTemplate,
+		joinNames(winnerNames), ltr(strconv.Itoa(int(winnerScore))),
+		ltr(strconv.Itoa(rank)), ltr(strconv.Itoa(int(score))))
+}
+
+// msgFinalResultsSpectatorTemplate is the Final results - spectator row:
+// the winner line alone. A Spectator has no score and no rank
+// (GetLeaderboard filters role = 'player'), so the personal second line
+// of msgFinalResultsTemplate has nothing to render.
+const msgFinalResultsSpectatorTemplate = "המשחק נגמר! 🏆 הזוכה: %s עם %s נקודות."
+
+func finalResultsSpectatorMessage(winnerNames []string, winnerScore int32) string {
+	return fmt.Sprintf(msgFinalResultsSpectatorTemplate, joinNames(winnerNames), ltr(strconv.Itoa(int(winnerScore))))
+}
+
+// msgFinalResultsSpectatorTieTemplate is the spectator row's tie form.
+const msgFinalResultsSpectatorTieTemplate = "המשחק נגמר! 🏆 הזוכים: %s עם %s נקודות."
+
+func finalResultsSpectatorTieMessage(winnerNames []string, winnerScore int32) string {
+	return fmt.Sprintf(msgFinalResultsSpectatorTieTemplate, joinNames(winnerNames), ltr(strconv.Itoa(int(winnerScore))))
+}
+
+// msgFinalResultsNoWinner is the Final results - no winner row, sent to
+// players and spectators alike when no participant finished with a
+// positive score (a game stopped before the first Reveal, or one with no
+// players at all). No trophy: EXPERIENCE.md reserves it for the winner
+// moment, and there is none. No placeholders — a rank line would read
+// "place 1" for every single recipient, which is exactly the outcome
+// this row exists to avoid.
+const msgFinalResultsNoWinner = "המשחק נגמר! הפעם לא נצברו נקודות — נתראה במשחק הבא!"
+
+func finalResultsNoWinnerMessage() string {
+	return msgFinalResultsNoWinner
+}
+
+// msgWinnerFinalTemplate is the Winner's final message row, sent only to
+// the winner and only on top of their Final-results message — UJ-2's
+// emotional climax. Singular verb form for a sole winner.
+const msgWinnerFinalTemplate = "מזל טוב, %s! 🏆 ניצחת עם %s נקודות!"
+
+func winnerFinalMessage(winnerNames []string, winnerScore int32) string {
+	return fmt.Sprintf(msgWinnerFinalTemplate, joinNames(winnerNames), ltr(strconv.Itoa(int(winnerScore))))
+}
+
+// msgWinnerFinalTieTemplate is the Winner's final message tie form:
+// every tied winner receives the same jointly-addressed message naming
+// all of them, with the plural verb (EXPERIENCE.md A16).
+const msgWinnerFinalTieTemplate = "מזל טוב, %s! 🏆 ניצחתם עם %s נקודות!"
+
+func winnerFinalTieMessage(winnerNames []string, winnerScore int32) string {
+	return fmt.Sprintf(msgWinnerFinalTieTemplate, joinNames(winnerNames), ltr(strconv.Itoa(int(winnerScore))))
 }
