@@ -43,7 +43,9 @@ This inventory and the grammar matrix below mirror the **message templates table
 | Too long | Free-Text reply over 200 characters | Limit hint; Participant may resend shorter |
 | Question closed | Answer after the server-side cutoff | Polite rejection, anticipation for the next question (FR-7) |
 | Personal result | Organizer reveals; answerers only | Grade, points, Speed Bonus if any, current rank (FR-6). Non-answerers get **silence** — the room's screen shows the reveal; no scolding |
-| Final results | Game ends; all Participants + Spectators | Winner name(s) + score, personal score + rank |
+| Final results | Game ends; Participants with a score | Winner name(s) + score, personal score + rank |
+| Final results — spectator | Game ends; Spectators | Winner name(s) + score only — a Spectator never answers, so has no score or rank to report |
+| Final results — no winner | Game ends with no positive score (e.g. stopped before the first Reveal) | No winner named, no personal placing, no trophy; sent to Participants and Spectators alike, and no winner message follows |
 | Winner's final message | Game ends; winner(s) only | Personal מזל טוב variant; ties addressed jointly `[ASSUMPTION A16]` |
 | Help (Universal Reply) | Any unrecognized message, any time | How to join, where the code comes from (FR-2) |
 | Invalid code | `JOIN` with unknown/expired code | Code not found; check with the Organizer |
@@ -116,7 +118,9 @@ Placeholders: `[N]` question number · `[Q]` total questions · `[T]` time limit
 | Result — correct + bonus | "נכון! 🎉 +[ניקוד] נקודות\n⚡ בונוס מהירות +[בונוס]\nמקום [דירוג] בטבלה" | Reveal; won a Speed Bonus (two emoji allowed, A20) |
 | Result — wrong | "לא נכון הפעם. התשובה: [תשובה נכונה]\nמקום [דירוג] בטבלה — עוד הכול פתוח!" | Reveal; mid-game `[A5]` |
 | Result — wrong, last question | "לא נכון הפעם. התשובה: [תשובה נכונה]\nמקום [דירוג] בטבלה" | Reveal; final question (no "עוד הכול פתוח") `[A5]` |
-| Final results | "המשחק נגמר! 🏆 הזוכה: [שם] עם [ניקוד] נקודות.\nסיימת במקום [דירוג] עם [ניקוד] נקודות — כל הכבוד!" | Game ends; ties: "הזוכים: [שם] ו-[שם] עם [ניקוד] נקודות" `[A16]` |
+| Final results | "המשחק נגמר! 🏆 הזוכה: [שם] עם [ניקוד] נקודות.\nסיימת במקום [דירוג] עם [ניקוד] נקודות — כל הכבוד!" | Game ends; Participants with a score. Ties: "הזוכים: [שם] ו-[שם] עם [ניקוד] נקודות" `[A16]` — **all** tied names are joined, with no cap: A16's "up to three names" is a Winner-takeover *layout* constraint (finite projector space), not a copy rule, and WhatsApp has no such limit |
+| Final results — spectator | "המשחק נגמר! 🏆 הזוכה: [שם] עם [ניקוד] נקודות." | Game ends; Spectators (no personal score/rank line — Spectators never answer); ties: "הזוכים: [שם] ו-[שם] עם [ניקוד] נקודות" `[A16]` |
+| Final results — no winner | "המשחק נגמר! הפעם לא נצברו נקודות — נתראה במשחק הבא!" | Game ends with no positive score (e.g. stopped before the first Reveal); sent to Participants and Spectators alike; no winner message is sent |
 | Winner's final message | "מזל טוב, [שם]! 🏆 ניצחת עם [ניקוד] נקודות!" | Game ends, winner(s); ties: "מזל טוב, [שם] ו-[שם]! 🏆 ניצחתם עם [ניקוד] נקודות!" |
 | Help (Universal Reply) | "כאן משחק החידון! כדי להצטרף שלחו: JOIN ואחריו הקוד (לדוגמה: JOIN COHEN24). את הקוד מקבלים מהמארגן." | Any unrecognized message |
 | Invalid code | "הקוד [קוד] לא נמצא. בדקו את הקוד עם המארגן ושלחו שוב: JOIN ואחריו הקוד." | Unknown/expired code |

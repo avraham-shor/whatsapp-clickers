@@ -206,9 +206,10 @@ func run(logger *slog.Logger) error {
 	// construction above reuses it.
 	questionNotifier := wa.NewQuestionNotifier(dispatcher, logger)
 	resultNotifier := wa.NewResultNotifier(dispatcher, logger)
+	finalNotifier := wa.NewFinalNotifier(dispatcher, logger)
 
 	// st satisfies both Pinger and GameStore.
-	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler, questionNotifier, resultNotifier)
+	router := httpapi.NewRouter(st, authSvc, st, webdist.FS(), webhookHandler, engine, hub, wsHandler, questionNotifier, resultNotifier, finalNotifier)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

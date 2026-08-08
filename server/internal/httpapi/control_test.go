@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -66,6 +67,15 @@ type stubControlEngine struct {
 	resultsForRevealedQuestionRequestedFor [][2]string // {gameID, organizerID}
 	resultsForRevealedQuestionPosition     int32
 	resultsForRevealedQuestionDone         chan struct{}
+
+	// resultsForFinishedGameMu guards the fields below, same reasoning
+	// again — dispatchGameFinished runs in a goroutine spawned after the
+	// HTTP response is written (story 3.9).
+	resultsForFinishedGameMu           sync.Mutex
+	resultsForFinishedGameResult       game.FinalResults
+	resultsForFinishedGameErr          error
+	resultsForFinishedGameRequestedFor []string
+	resultsForFinishedGameDone         chan struct{}
 }
 
 func (s *stubControlEngine) OpenLobby(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
@@ -151,6 +161,25 @@ func (s *stubControlEngine) ResultsForRevealedQuestion(ctx context.Context, game
 	return result, err
 }
 
+func (s *stubControlEngine) ResultsForFinishedGame(ctx context.Context, gameID string) (game.FinalResults, error) {
+	s.resultsForFinishedGameMu.Lock()
+	s.resultsForFinishedGameRequestedFor = append(s.resultsForFinishedGameRequestedFor, gameID)
+	result, err := s.resultsForFinishedGameResult, s.resultsForFinishedGameErr
+	s.resultsForFinishedGameMu.Unlock()
+	if s.resultsForFinishedGameDone != nil {
+		s.resultsForFinishedGameDone <- struct{}{}
+	}
+	return result, err
+}
+
+// ResultsForFinishedGameRequestedFor returns a thread-safe snapshot of
+// every gameID ResultsForFinishedGame was called with.
+func (s *stubControlEngine) ResultsForFinishedGameRequestedFor() []string {
+	s.resultsForFinishedGameMu.Lock()
+	defer s.resultsForFinishedGameMu.Unlock()
+	return append([]string(nil), s.resultsForFinishedGameRequestedFor...)
+}
+
 // stubBroadcaster implements SnapshotBroadcaster and records every call.
 type stubBroadcaster struct {
 	calls []broadcastCall
@@ -233,6 +262,37 @@ func (s *stubResultDispatcher) Calls() []resultDispatchCall {
 	return append([]resultDispatchCall(nil), s.calls...)
 }
 
+// stubFinalDispatcher implements FinalDispatcher and records every
+// DispatchGameFinished call, mirroring stubResultDispatcher's shape —
+// dispatchGameFinished also runs in a goroutine spawned after the HTTP
+// response is written (see control.go, story 3.9).
+type stubFinalDispatcher struct {
+	mu    sync.Mutex
+	calls []finalDispatchCall
+	done  chan struct{}
+}
+
+type finalDispatchCall struct {
+	gameID  string
+	results game.FinalResults
+}
+
+func (s *stubFinalDispatcher) DispatchGameFinished(gameID string, results game.FinalResults) {
+	s.mu.Lock()
+	s.calls = append(s.calls, finalDispatchCall{gameID, results})
+	s.mu.Unlock()
+	if s.done != nil {
+		s.done <- struct{}{}
+	}
+}
+
+// Calls returns a thread-safe snapshot of every recorded call.
+func (s *stubFinalDispatcher) Calls() []finalDispatchCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]finalDispatchCall(nil), s.calls...)
+}
+
 // waitForSignal blocks until ch fires or the test times out — used to
 // observe the dispatch goroutine handleStartGame/handleNextQuestion spawn
 // after writing their HTTP response, without sleeping or racing it.
@@ -251,14 +311,14 @@ func waitForSignal(t *testing.T, ch <-chan struct{}) {
 // dispatch.
 func controlRouter(engine ControlEngine, hub SnapshotBroadcaster) http.Handler {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil, nil)
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil, nil, nil)
 }
 
 // controlRouterWithDispatcher is controlRouter plus a real QuestionDispatcher
 // — used only by the question-dispatch tests below.
 func controlRouterWithDispatcher(engine ControlEngine, hub SnapshotBroadcaster, dispatcher QuestionDispatcher) http.Handler {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, dispatcher, nil)
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, dispatcher, nil, nil)
 }
 
 // controlRouterWithResultDispatcher is controlRouter plus a real
@@ -266,7 +326,15 @@ func controlRouterWithDispatcher(engine ControlEngine, hub SnapshotBroadcaster, 
 // 3.8).
 func controlRouterWithResultDispatcher(engine ControlEngine, hub SnapshotBroadcaster, resultDispatcher ResultDispatcher) http.Handler {
 	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
-	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil, resultDispatcher)
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil, resultDispatcher, nil)
+}
+
+// controlRouterWithFinalDispatcher is controlRouter plus a real
+// FinalDispatcher — used only by the final-results-dispatch tests below
+// (story 3.9).
+func controlRouterWithFinalDispatcher(engine ControlEngine, hub SnapshotBroadcaster, finalDispatcher FinalDispatcher) http.Handler {
+	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
+	return NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, nil, nil, finalDispatcher)
 }
 
 func TestOpenLobbySuccessReturnsSnapshotAndBroadcasts(t *testing.T) {
@@ -337,7 +405,7 @@ func TestOpenLobbyForeignOrMissingGameReturns404(t *testing.T) {
 func TestOpenLobbyWithoutSessionReturns401(t *testing.T) {
 	engine := &stubControlEngine{}
 	hub := &stubBroadcaster{}
-	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil, nil)
+	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+"/open-lobby", nil))
 
@@ -513,7 +581,7 @@ func TestControlActionWithoutSessionReturns401(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &stubControlEngine{}
 			hub := &stubBroadcaster{}
-			router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil, nil)
+			router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), nil, engine, hub, nil, nil, nil, nil)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+tc.path, nil))
 
@@ -659,8 +727,11 @@ func TestStartGameDispatchSkippedOnRecipientsError(t *testing.T) {
 
 func TestOtherControlActionsNeverDispatch(t *testing.T) {
 	// CloseQuestion/StopGame don't accept a QuestionDispatcher param at all
-	// (Reveal now accepts a different one, ResultDispatcher — see the
-	// "Result dispatch" block below), so dispatchQuestionOpened is never
+	// (Reveal accepts a different one, ResultDispatcher — see the "Result
+	// dispatch" block below; and as of story 3.9 StopGame accepts a
+	// FinalDispatcher and NextQuestion accepts one in addition to its
+	// QuestionDispatcher — see "Final results dispatch"), so
+	// dispatchQuestionOpened is never
 	// reached from these handlers — true by construction. The snapshot below
 	// carries a non-nil CurrentQuestion,
 	// matching what buildSnapshot really produces once
@@ -822,5 +893,210 @@ func TestOtherControlActionsNeverDispatchResults(t *testing.T) {
 	}
 	if got := engine.ResultsForRevealedQuestionRequestedFor(); len(got) != 0 {
 		t.Errorf("ResultsForRevealedQuestion called %d times, want 0 for /close-question", len(got))
+	}
+}
+
+// --- Final results dispatch (story 3.9) ---
+
+// finalResultsFixture is the resolved game-end data set the stub engine
+// hands back — a sole winner plus one other player, enough to prove the
+// dispatcher receives exactly what ResultsForFinishedGame returned.
+func finalResultsFixture() game.FinalResults {
+	return game.FinalResults{
+		Recipients: []game.FinalRecipient{
+			{Phone: "+972500000001", IsWinner: true, Rank: 1, Score: 300},
+			{Phone: "+972500000002", Rank: 2, Score: 200},
+		},
+		WinnerNames: []string{"David Cohen"},
+		WinnerScore: 300,
+	}
+}
+
+func assertOneFinalDispatch(t *testing.T, dispatcher *stubFinalDispatcher, want game.FinalResults) {
+	t.Helper()
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("DispatchGameFinished called %d times, want 1", len(calls))
+	}
+	if calls[0].gameID != testGameID {
+		t.Errorf("dispatch gameID = %q, want %q", calls[0].gameID, testGameID)
+	}
+	if !reflect.DeepEqual(calls[0].results, want) {
+		t.Errorf("dispatch results = %+v, want %+v", calls[0].results, want)
+	}
+}
+
+func TestNextQuestionPastLastQuestionDispatchesFinalResults(t *testing.T) {
+	engine := &stubControlEngine{
+		nextQuestionSnapshot:         game.Snapshot{GameID: testGameID, State: "finished", CurrentQuestion: nil},
+		resultsForFinishedGameResult: finalResultsFixture(),
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubFinalDispatcher{done: make(chan struct{}, 1)}
+	rec := httptest.NewRecorder()
+	controlRouterWithFinalDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/next-question", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /next-question = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, dispatcher.done)
+
+	assertOneFinalDispatch(t, dispatcher, finalResultsFixture())
+	if got := engine.ResultsForFinishedGameRequestedFor(); len(got) != 1 || got[0] != testGameID {
+		t.Errorf("ResultsForFinishedGame requested for %v, want exactly [%s]", got, testGameID)
+	}
+}
+
+// TestNextQuestionToAnotherQuestionDoesNotDispatchFinalResults pins that
+// the two goroutines handleNextQuestion spawns are mutually exclusive:
+// on a question_open outcome the question dispatch runs and the
+// final-results dispatch's State guard trips. Wires BOTH dispatchers
+// inline (the controlRouter* helpers each wire only one) so the positive
+// half — the question dispatch still firing, unchanged — is asserted
+// alongside the negative half.
+func TestNextQuestionToAnotherQuestionDoesNotDispatchFinalResults(t *testing.T) {
+	question := game.CurrentQuestion{ID: "q2", Position: 2, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	engine := &stubControlEngine{
+		nextQuestionSnapshot: game.Snapshot{GameID: testGameID, State: "question_open", QuestionCount: 3, CurrentQuestion: &question},
+		playerRecipients:     []string{"+972500000001"},
+	}
+	hub := &stubBroadcaster{}
+	questionDispatcher := &stubQuestionDispatcher{done: make(chan struct{}, 1)}
+	finalDispatcher := &stubFinalDispatcher{}
+	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, questionDispatcher, nil, finalDispatcher)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/next-question", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /next-question = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, questionDispatcher.done)
+
+	if calls := questionDispatcher.Calls(); len(calls) != 1 {
+		t.Errorf("DispatchQuestionOpened called %d times, want 1 — the question path is unchanged", len(calls))
+	}
+	if calls := finalDispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchGameFinished called %d times, want 0 when the game is not finished", len(calls))
+	}
+	if got := engine.ResultsForFinishedGameRequestedFor(); len(got) != 0 {
+		t.Errorf("ResultsForFinishedGame called %d times, want 0 when the game is not finished", len(got))
+	}
+}
+
+// TestStopGameDispatchesFinalResults is the AC-1 case the natural
+// end-of-game path does not cover: an Organizer aborting a live round
+// owes the room the same closure (see the story's design notes).
+func TestStopGameDispatchesFinalResults(t *testing.T) {
+	engine := &stubControlEngine{
+		stopGameSnapshot:             game.Snapshot{GameID: testGameID, State: "finished", CurrentQuestion: nil},
+		resultsForFinishedGameResult: finalResultsFixture(),
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubFinalDispatcher{done: make(chan struct{}, 1)}
+	rec := httptest.NewRecorder()
+	controlRouterWithFinalDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/stop", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /stop = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, dispatcher.done)
+
+	assertOneFinalDispatch(t, dispatcher, finalResultsFixture())
+	if got := engine.ResultsForFinishedGameRequestedFor(); len(got) != 1 || got[0] != testGameID {
+		t.Errorf("ResultsForFinishedGame requested for %v, want exactly [%s]", got, testGameID)
+	}
+}
+
+// TestFinalResultsDispatchSurvivesDegradedSnapshot pins the design note
+// that State is the ONLY snapshot field this path reads. emptySnapshot
+// (what snapshotAfterCommit falls back to when buildSnapshot fails)
+// carries State plus nothing else — story 3.8's original design read
+// CurrentQuestion off the snapshot and silently lost its entire fan-out
+// on exactly this input. Here the whole data set is re-resolved from the
+// DB by ResultsForFinishedGame(gameID), so the failure mode is
+// structurally impossible; this test keeps it that way.
+func TestFinalResultsDispatchSurvivesDegradedSnapshot(t *testing.T) {
+	engine := &stubControlEngine{
+		stopGameSnapshot:             game.Snapshot{GameID: testGameID, State: "finished", CurrentQuestion: nil, Participants: []game.ParticipantSummary{}},
+		resultsForFinishedGameResult: finalResultsFixture(),
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubFinalDispatcher{done: make(chan struct{}, 1)}
+	rec := httptest.NewRecorder()
+	controlRouterWithFinalDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/stop", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /stop = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	waitForSignal(t, dispatcher.done)
+
+	assertOneFinalDispatch(t, dispatcher, finalResultsFixture())
+}
+
+func TestFinalResultsDispatchSkippedOnEngineError(t *testing.T) {
+	engine := &stubControlEngine{
+		stopGameSnapshot:           game.Snapshot{GameID: testGameID, State: "finished"},
+		resultsForFinishedGameErr:  errors.New("db down"),
+		resultsForFinishedGameDone: make(chan struct{}, 1),
+	}
+	hub := &stubBroadcaster{}
+	dispatcher := &stubFinalDispatcher{}
+	rec := httptest.NewRecorder()
+	controlRouterWithFinalDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/stop", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /stop = %d, want 200 even when final-results resolution fails (already-committed transition)", rec.Code)
+	}
+	waitForSignal(t, engine.resultsForFinishedGameDone)
+
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchGameFinished called %d times, want 0 when ResultsForFinishedGame errors", len(calls))
+	}
+}
+
+func TestOtherControlActionsNeverDispatchFinalResults(t *testing.T) {
+	// StartGame/CloseQuestion/Reveal don't accept a FinalDispatcher param
+	// at all — true by construction, since only handleNextQuestion and
+	// handleStopGame do. Each snapshot below carries a live, non-finished
+	// state, so nothing here could trip dispatchGameFinished's guard even
+	// if one of these handlers were wired to it by mistake.
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	cases := []struct {
+		route       string
+		setSnapshot func(*stubControlEngine)
+	}{
+		{"start", func(e *stubControlEngine) {
+			e.startGameSnapshot = game.Snapshot{GameID: testGameID, State: "question_open", CurrentQuestion: &question}
+		}},
+		{"close-question", func(e *stubControlEngine) {
+			e.closeQuestionSnapshot = game.Snapshot{GameID: testGameID, State: "question_closed", CurrentQuestion: &question}
+		}},
+		{"reveal", func(e *stubControlEngine) {
+			e.revealSnapshot = game.Snapshot{GameID: testGameID, State: "revealed", CurrentQuestion: &question}
+			e.revealPosition = 1
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.route, func(t *testing.T) {
+			engine := &stubControlEngine{}
+			tc.setSnapshot(engine)
+			hub := &stubBroadcaster{}
+			dispatcher := &stubFinalDispatcher{}
+			rec := httptest.NewRecorder()
+			controlRouterWithFinalDispatcher(engine, hub, dispatcher).ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/"+tc.route, ""))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("POST /%s = %d, want 200 (body %s)", tc.route, rec.Code, rec.Body)
+			}
+			if calls := dispatcher.Calls(); len(calls) != 0 {
+				t.Errorf("DispatchGameFinished called %d times, want 0 for /%s", len(calls), tc.route)
+			}
+			// Read through the copy-under-lock accessor, never the raw
+			// field — this method runs from a post-response goroutine.
+			if got := engine.ResultsForFinishedGameRequestedFor(); len(got) != 0 {
+				t.Errorf("ResultsForFinishedGame called %d times, want 0 for /%s", len(got), tc.route)
+			}
+		})
 	}
 }
