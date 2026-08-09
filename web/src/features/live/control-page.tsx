@@ -7,6 +7,12 @@ import { strings } from '@/lib/strings.he'
 import { useSpaceAction } from '@/lib/use-space-action'
 import type { LobbySnapshot } from '@/lib/types'
 import { Button } from '@/components/ui/button'
+// Cross-feature import, the established exception rather than a new one:
+// lobby-page.tsx already imports ControlPage from features/live/ for the
+// same reason — one live surface composes the next as the game advances.
+// Duplicating the summary or promoting it to lib/ would both be worse (it
+// is a feature view, not shared logic).
+import { ResultsSummary } from '@/features/results/results-summary'
 import { ResponseStats } from './response-stats'
 import {
   AlertDialog,
@@ -106,10 +112,17 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
     stopRef.current.reset()
   }, [snapshot.state])
 
+  // Game over: EXPERIENCE.md's Host-control-panel table specifies no
+  // primary CTA here, the results summary on screen, and a secondary back
+  // CTA. gameOverTitle stays the heading (the organizer just finished a
+  // game); the routed page uses results.title instead. This branch returns
+  // before the useSpaceAction/error-banner UI below, so the summary never
+  // competes with the Space handler.
   if (snapshot.state === 'finished') {
     return (
-      <div className="flex flex-col items-start gap-4">
-        <p className="text-host-text">{strings.live.gameOverTitle}</p>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <h1 className="text-2xl font-heading text-host-text">{strings.live.gameOverTitle}</h1>
+        <ResultsSummary gameId={gameId} />
         <Link to="/" className="text-green-800 underline">
           {strings.gameEditor.backToGames}
         </Link>

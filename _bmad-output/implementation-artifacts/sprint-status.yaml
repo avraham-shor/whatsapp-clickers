@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-07-10
-last_updated: 2026-08-07
+last_updated: 2026-08-09
 
 # note: 3.7's baseline_commit predates 3.6's commit landing; 3.7 branches
 # from story/3-6-ai-semantic-validation-fail-closed (commit 7a4e55e), not main
@@ -74,13 +74,13 @@ development_status:
   3-6-ai-semantic-validation-fail-closed: done
   3-7-scoring-with-speed-bonuses: done
   3-8-personal-results-after-reveal: done
-  3-9-final-results-for-everyone: review
-  3-10-post-game-summary-on-the-dashboard: backlog
+  3-9-final-results-for-everyone: done
+  3-10-post-game-summary-on-the-dashboard: done
   epic-3-retrospective: optional
 
   # Epic 4: The Room's Stage — Audience Display
-  epic-4: backlog
-  4-1-audience-display-shell-the-screen-that-follows-the-game: backlog
+  epic-4: in-progress
+  4-1-audience-display-shell-the-screen-that-follows-the-game: ready-for-dev
   4-2-lobby-stage-the-room-fills-the-screen: backlog
   4-3-question-stage-with-the-authoritative-timer: backlog
   4-4-reveal-stage-the-answer-marked: backlog

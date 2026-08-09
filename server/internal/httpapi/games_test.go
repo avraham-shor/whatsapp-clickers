@@ -38,15 +38,22 @@ type stubGames struct {
 	importedQs  []gen.Question
 	importErr   error
 
-	createdTitles  []string
-	listedFor      []string
-	gotGame        [][2]string
-	createdQs      []store.CreateQuestionParams
-	updatedQs      []store.UpdateQuestionParams
-	deletedQs      [][3]string
-	reorders       [][]string
-	scoringUpdates []store.UpdateGameScoringParams
-	imports        [][3]string
+	leaderboard      []store.ParticipantScore
+	leaderboardErr   error
+	questionStats    []store.QuestionResponseStats
+	questionStatsErr error
+
+	createdTitles    []string
+	listedFor        []string
+	gotGame          [][2]string
+	createdQs        []store.CreateQuestionParams
+	updatedQs        []store.UpdateQuestionParams
+	deletedQs        [][3]string
+	reorders         [][]string
+	scoringUpdates   []store.UpdateGameScoringParams
+	imports          [][3]string
+	leaderboardFor   []string
+	questionStatsFor [][2]string
 }
 
 func (s *stubGames) CreateGame(ctx context.Context, organizerID, title string) (gen.Game, error) {
@@ -111,6 +118,20 @@ func (s *stubGames) ImportPackageQuestions(ctx context.Context, gameID, organize
 	return s.importedQs, s.importErr
 }
 
+// The two post-game read methods (story 3.10) are called from the request
+// goroutine only — this story spawns nothing after the response, unlike
+// control.go's dispatch paths — so these need no mutex and no
+// copy-under-lock accessor, unlike control_test.go's stubs.
+func (s *stubGames) GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error) {
+	s.leaderboardFor = append(s.leaderboardFor, gameID)
+	return s.leaderboard, s.leaderboardErr
+}
+
+func (s *stubGames) ListQuestionResponseStats(ctx context.Context, gameID, organizerID string) ([]store.QuestionResponseStats, error) {
+	s.questionStatsFor = append(s.questionStatsFor, [2]string{gameID, organizerID})
+	return s.questionStats, s.questionStatsErr
+}
+
 // noGames is the GameStore for tests that never touch game routes.
 func noGames() *stubGames { return &stubGames{} }
 
@@ -130,6 +151,14 @@ func draftGame() *stubGames {
 		CreatedAt:        time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC),
 		UpdatedAt:        time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC),
 	}}
+}
+
+// finishedGame returns a stub seeded with an owned finished game — the
+// starting state for the post-game results tests (story 3.10).
+func finishedGame() *stubGames {
+	games := draftGame()
+	games.game.State = "finished"
+	return games
 }
 
 // validScoringBody is a well-formed full-replacement scoring request; tests
@@ -337,6 +366,7 @@ func TestGameMutationsWithoutSessionReturn401(t *testing.T) {
 		"delete question": httptest.NewRequest(http.MethodDelete, "/api/games/"+testGameID+"/questions/"+testQuestionID, nil),
 		"reorder":         httptest.NewRequest(http.MethodPost, "/api/games/"+testGameID+"/questions/reorder", strings.NewReader(`{}`)),
 		"update scoring":  httptest.NewRequest(http.MethodPut, "/api/games/"+testGameID+"/scoring", strings.NewReader(validScoringBody)),
+		"game results":    httptest.NewRequest(http.MethodGet, "/api/games/"+testGameID+"/results", nil),
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)

@@ -76,6 +76,11 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, we
 				g.Get("/", handleListGames(games))
 				g.Route("/{gameID}", func(gr chi.Router) {
 					gr.Get("/", handleGetGame(games))
+					// Outside the engine/hub guard deliberately: the
+					// post-game summary is a pure store read like GET /
+					// and PUT /scoring, and gating it on the engine would
+					// make it vanish in every test router passing nil.
+					gr.Get("/results", handleGameResults(games))
 					gr.Put("/scoring", handleUpdateScoring(games))
 					if engine != nil && hub != nil {
 						gr.Post("/open-lobby", handleOpenLobby(engine, hub))

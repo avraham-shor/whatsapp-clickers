@@ -15,7 +15,8 @@ import (
 	"github.com/avraham-shor/whatsapp-clickers/internal/store/gen"
 )
 
-// GameStore is the games/questions surface handlers depend on; *store.Store
+// GameStore is the games/questions surface handlers depend on, plus the
+// post-game read surface the results summary serves (FR-14); *store.Store
 // satisfies it.
 type GameStore interface {
 	CreateGame(ctx context.Context, organizerID, title string) (gen.Game, error)
@@ -29,6 +30,8 @@ type GameStore interface {
 	UpdateGameScoring(ctx context.Context, arg store.UpdateGameScoringParams) (gen.Game, error)
 	ListQuestionPackages(ctx context.Context) ([]gen.ListQuestionPackagesRow, error)
 	ImportPackageQuestions(ctx context.Context, gameID, organizerID, packageID string) ([]gen.Question, error)
+	GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error)
+	ListQuestionResponseStats(ctx context.Context, gameID, organizerID string) ([]store.QuestionResponseStats, error)
 }
 
 // maxTitleRunes bounds the game title (runes, not bytes — titles are Hebrew).

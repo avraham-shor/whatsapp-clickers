@@ -8,6 +8,7 @@ import { LoginPage } from '@/features/auth/login-page'
 import { GamesListPage } from '@/features/builder/games-list-page'
 import { GameEditorPage } from '@/features/builder/game-editor-page'
 import { LobbyPage } from '@/features/lobby/lobby-page'
+import { ResultsPage } from '@/features/results/results-page'
 
 interface Organizer {
   id: string
@@ -71,6 +72,7 @@ const router = createBrowserRouter([
           { index: true, element: <GamesListPage /> },
           { path: 'games/:gameId', element: <GameEditorPage /> },
           { path: 'games/:gameId/lobby', element: <LobbyPage /> },
+          { path: 'games/:gameId/results', element: <ResultsPage /> },
         ],
       },
     ],

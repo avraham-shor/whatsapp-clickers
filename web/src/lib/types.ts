@@ -99,6 +99,32 @@ export interface SnapshotEnvelope {
   state: LobbySnapshot
 }
 
+/** Mirrors the Go questionStatsPayload — one Question's post-game
+ * response counts (FR-14). answeredCount counts every recorded answer;
+ * correctCount counts only those graded correct, so an answer still
+ * ungraded is answered-but-not-correct. */
+export interface QuestionStats {
+  id: string
+  position: number
+  type: QuestionType
+  text: string
+  answeredCount: number
+  correctCount: number
+}
+
+/** Mirrors the Go resultsPayload — the whole post-game summary in one
+ * REST response. playerCount is the response-rate denominator: the
+ * number of player-role Participants (Spectators excluded — they never
+ * answer). */
+export interface GameResults {
+  gameId: string
+  title: string
+  state: GameState
+  playerCount: number
+  leaderboard: LeaderboardEntry[]
+  questions: QuestionStats[]
+}
+
 /** A Question Bank package card: title, count, and a first-question preview (A13). */
 export interface QuestionPackage {
   id: string
