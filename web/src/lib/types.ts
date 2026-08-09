@@ -78,6 +78,13 @@ export interface LeaderboardEntry {
   rank: number
 }
 
+/** Mirrors the Go game.DisplaySettings — room-level rendering settings
+ * the Audience Display obeys. Set by the Organizer on the dashboard
+ * because the audience cannot set prefers-reduced-motion on a projector. */
+export interface DisplaySettings {
+  reducedMotion: boolean
+}
+
 /** Mirrors the Go game.Snapshot — the REST open-lobby response body and the
  * WS envelope's "state" field share this one shape. */
 export interface LobbySnapshot {
@@ -90,6 +97,8 @@ export interface LobbySnapshot {
   questionCount: number
   currentQuestion: CurrentQuestion | null
   leaderboard: LeaderboardEntry[]
+  /** Non-optional: the server always sends it (no omitempty). */
+  displaySettings: DisplaySettings
 }
 
 /** The one WS wire message shape: server->client only, full snapshots. */

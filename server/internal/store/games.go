@@ -108,6 +108,17 @@ func (s *Store) UpdateGameScoring(ctx context.Context, arg UpdateGameScoringPara
 	return game, err
 }
 
+// UpdateGameDisplaySettings sets the room-level display settings;
+// ownership is in the WHERE clause, so a foreign game is ErrNotFound
+// like a missing one.
+func (s *Store) UpdateGameDisplaySettings(ctx context.Context, gameID, organizerID string, reducedMotion bool) (gen.Game, error) {
+	game, err := s.q.UpdateGameDisplaySettings(ctx, gen.UpdateGameDisplaySettingsParams{ID: gameID, OrganizerID: organizerID, ReducedMotion: reducedMotion})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
+
 // OpenGameLobby transitions a game from draft to lobby; a foreign/missing
 // game or one no longer in draft (including a concurrent racer that already
 // won the transition) is ErrNotFound — the game package turns the latter

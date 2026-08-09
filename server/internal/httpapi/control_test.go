@@ -76,6 +76,24 @@ type stubControlEngine struct {
 	resultsForFinishedGameErr          error
 	resultsForFinishedGameRequestedFor []string
 	resultsForFinishedGameDone         chan struct{}
+
+	// Unguarded like the six transitions above, and for the same reason:
+	// SetDisplaySettings runs entirely in the request goroutine and spawns
+	// no post-response dispatch. The mutexes above exist only for the
+	// methods a dispatch goroutine can reach (story 4.1).
+	setDisplaySettingsSnapshot     game.Snapshot
+	setDisplaySettingsErr          error
+	setDisplaySettingsRequestedFor []setDisplaySettingsCall
+}
+
+// setDisplaySettingsCall records one SetDisplaySettings call. Unlike the
+// [2]string the transitions above record, it carries the written value
+// too, so a test can prove `false` reached the engine as a deliberate
+// value rather than as a decoded absence.
+type setDisplaySettingsCall struct {
+	gameID        string
+	organizerID   string
+	reducedMotion bool
 }
 
 func (s *stubControlEngine) OpenLobby(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
@@ -111,6 +129,11 @@ func (s *stubControlEngine) NextQuestion(ctx context.Context, gameID, organizerI
 func (s *stubControlEngine) StopGame(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
 	s.stopGameRequestedFor = append(s.stopGameRequestedFor, [2]string{gameID, organizerID})
 	return s.stopGameSnapshot, s.stopGameErr
+}
+
+func (s *stubControlEngine) SetDisplaySettings(ctx context.Context, gameID, organizerID string, reducedMotion bool) (game.Snapshot, error) {
+	s.setDisplaySettingsRequestedFor = append(s.setDisplaySettingsRequestedFor, setDisplaySettingsCall{gameID, organizerID, reducedMotion})
+	return s.setDisplaySettingsSnapshot, s.setDisplaySettingsErr
 }
 
 func (s *stubControlEngine) PlayerRecipients(ctx context.Context, gameID string) ([]string, error) {

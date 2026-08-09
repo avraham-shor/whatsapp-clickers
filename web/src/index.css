@@ -177,3 +177,65 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Audience Display projection ramp (DESIGN.md A19, UX-DR3). Sizes are
+ * viewport-width relative so the stage keeps its width proportions from
+ * the 1280x720 minimum to 1920x1080 and beyond; at 1920 each value lands
+ * on A19's exact pixel figure (1vw = 19.2px):
+ *   display 5vw = 96px    heading 3.3334vw = 64px
+ *   ui      2.5vw = 48px  body    2.0834vw = 40px
+ *   safe margin 2.5vw = 48px (projector overscan tolerance)
+ * Nothing on the stage sits below the body step.
+ *
+ * DELIBERATE DEVIATION, confirmed by Avraham at 4.1's code review
+ * (2026-08-09): A19 says "all sizes in rem so the whole ramp scales with
+ * viewport width", but bare rem does not scale with the viewport at all —
+ * it is fixed to the root font size, which is the opposite of what A19
+ * asks for. vw delivers A19's intent and its exact figures. The cost is
+ * real and is accepted knowingly: vw text does not respond to browser
+ * zoom, so this surface forfeits UX-DR14's "functional at 200% zoom"
+ * (WCAG 1.4.4) clause. Accepted because a projector is an output-only
+ * surface nobody zooms; the dashboard and every participant-facing
+ * surface stay on Tailwind's rem scale. If the display is ever opened as
+ * a normal readable page, revisit with clamp() over a rem floor.
+ *
+ * --stage-display and --stage-ui are intentionally unreferenced today:
+ * the ramp is defined once here so stories 4.2-4.6 inherit it instead of
+ * each inventing sizes (4.3's timer numeral is the display step).
+ */
+.stage-root {
+  --stage-display: 5vw;
+  --stage-heading: 3.3334vw;
+  --stage-ui: 2.5vw;
+  --stage-body: 2.0834vw;
+  --stage-margin: 2.5vw;
+}
+
+/* The stage cross-fade (EXPERIENCE.md: <=300ms, instant when reduced).
+   Two independent sources: the viewer's own OS setting, and the
+   Organizer's room-level toggle riding the snapshot - the audience
+   cannot set the former on a projector, which is why the latter exists.
+
+   Inside @layer components deliberately (code review, 2026-08-09):
+   unlayered rules outrank every layered one regardless of specificity,
+   and Tailwind v4 puts its utilities in @layer utilities - so an
+   unlayered .stage-fade would silently beat any animation-* utility a
+   stage in 4.2-4.6 puts on the same element, with no specificity
+   conflict visible to explain it. The custom properties above stay
+   unlayered: they are declarations on a class nothing else defines, so
+   layering buys them nothing. */
+@layer components {
+  .stage-fade {
+    animation: stage-fade-in 300ms ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage-fade { animation: none; }
+  }
+  .stage-root[data-reduced-motion='true'] .stage-fade { animation: none; }
+}
+
+@keyframes stage-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

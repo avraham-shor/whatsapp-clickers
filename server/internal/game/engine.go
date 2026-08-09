@@ -72,6 +72,7 @@ type Store interface {
 	CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error)
 	CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error)
 	UpdateAnswerGrade(ctx context.Context, answerID string, isCorrect bool, stage string) error
+	UpdateGameDisplaySettings(ctx context.Context, gameID, organizerID string, reducedMotion bool) (gen.Game, error)
 }
 
 // Engine is the single write path for games.state (Enforcement Guidelines:
@@ -206,6 +207,37 @@ func (e *Engine) OpenLobby(ctx context.Context, gameID, organizerID string) (Sna
 		return Snapshot{}, err
 	}
 	return e.snapshotAfterCommit(ctx, g), nil
+}
+
+// SetDisplaySettings updates the room-level display settings for gameID
+// and returns the resulting snapshot for broadcast.
+//
+// Not a state transition: games.state is neither read as a precondition
+// nor written. It lives on the Engine anyway because the snapshot is the
+// Engine's to build (Enforcement Guidelines: state changes are emitted
+// only through the engine, and this changes what every WS client
+// renders), and because httpapi must not learn to build snapshots.
+//
+// Legal from lobby through finished, and from draft too: a settings
+// write that arrives before the display is ever launched is harmless and
+// guarding it would add a failure mode with no beneficiary.
+//
+// Deliberately NOT snapshotAfterCommit, unlike every transition above:
+// that helper degrades a failed build to emptySnapshot so a committed
+// state change is never reported as a failure, and the caller broadcasts
+// the result. Here nothing but one boolean committed, so degrading would
+// trade a retryable error for a broadcast that blanks the roster, the
+// current question and the leaderboard for the whole room — reachable
+// from a cosmetic toggle, on a finished game too, which never
+// re-broadcasts to self-correct. A build failure is returned as an error
+// instead: the setting is already persisted, no client is told anything,
+// and the organizer's retry is harmless. (Code review, 2026-08-09.)
+func (e *Engine) SetDisplaySettings(ctx context.Context, gameID, organizerID string, reducedMotion bool) (Snapshot, error) {
+	g, err := e.store.UpdateGameDisplaySettings(ctx, gameID, organizerID, reducedMotion)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return e.detachedSnapshot(ctx, g)
 }
 
 // StartGame transitions gameID from lobby to question_open on its first
@@ -464,21 +496,32 @@ func (e *Engine) PlayerRecipients(ctx context.Context, gameID string) ([]string,
 // questionless snapshot on failure and lets the next real read (a
 // reconnect, or a future broadcast) pick up the true state.
 //
-// Detached from ctx's cancellation (context.WithoutCancel) and given its
-// own bounded timeout instead: this build feeds the broadcast every other
-// WS client receives, so the request that triggered the transition being
-// aborted (a closed tab, a dropped connection) must not degrade that
-// broadcast for everyone else — but an unbounded context would let a
-// genuinely wedged DB hang here forever, so it still gets its own budget.
+// Builds on detachedSnapshot's context handling; the degradation is the
+// part specific to a committed transition.
 func (e *Engine) snapshotAfterCommit(ctx context.Context, g gen.Game) Snapshot {
-	buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	snap, err := e.buildSnapshot(buildCtx, g)
+	snap, err := e.detachedSnapshot(ctx, g)
 	if err != nil {
 		e.logger.Warn("post-transition snapshot build failed, degrading to an empty/questionless snapshot", "game_id", g.ID, "error", err)
 		return emptySnapshot(e.platformNumber, g)
 	}
 	return snap
+}
+
+// detachedSnapshot builds g's snapshot on a context detached from ctx's
+// cancellation (context.WithoutCancel) and given its own bounded timeout
+// instead: this build feeds the broadcast every other WS client receives,
+// so the request that triggered the write being aborted (a closed tab, a
+// dropped connection) must not degrade that broadcast for everyone else —
+// but an unbounded context would let a genuinely wedged DB hang here
+// forever, so it still gets its own budget.
+//
+// Returns the build error. Callers whose write was a committed state
+// transition go through snapshotAfterCommit, which degrades instead;
+// callers whose write was not (SetDisplaySettings) propagate it.
+func (e *Engine) detachedSnapshot(ctx context.Context, g gen.Game) (Snapshot, error) {
+	buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return e.buildSnapshot(buildCtx, g)
 }
 
 func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error) {
@@ -536,6 +579,7 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 		QuestionCount:    len(questions),
 		CurrentQuestion:  current,
 		Leaderboard:      leaderboard,
+		DisplaySettings:  DisplaySettings{ReducedMotion: g.ReducedMotion},
 	}, nil
 }
 
@@ -551,5 +595,9 @@ func emptySnapshot(platformNumber string, g gen.Game) Snapshot {
 		ParticipantCount: 0,
 		Participants:     []ParticipantSummary{},
 		Leaderboard:      []LeaderboardEntry{},
+		// Carried from g like State/JoinCode above, and for the same
+		// reason: the degraded fallback must not silently flip the room's
+		// motion setting back to animated at the worst possible moment.
+		DisplaySettings: DisplaySettings{ReducedMotion: g.ReducedMotion},
 	}
 }

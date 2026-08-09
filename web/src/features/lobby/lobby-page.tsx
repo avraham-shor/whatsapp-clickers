@@ -8,6 +8,11 @@ import { useGameSocket } from '@/lib/use-game-socket'
 import { useSpaceAction } from '@/lib/use-space-action'
 import { Button } from '@/components/ui/button'
 import { ControlPage } from '@/features/live/control-page'
+// Same pre-existing cross-feature exception as ControlPage above, unchanged
+// in kind: the display controls are host-side controls, so they live in
+// features/live/ (features/display/ is output-only by the architecture's
+// own boundary rule) and both host surfaces render the one component.
+import { DisplayControls } from '@/features/live/display-controls'
 
 // Single data source: connect immediately on mount regardless of state
 // (AC-3 doesn't gate the connection on being past draft) and render off the
@@ -129,6 +134,19 @@ export function LobbyPage() {
       >
         {strings.live.startGameCta}
       </Button>
+
+      {/* Lobby branch only: EXPERIENCE.md's State Patterns puts the display
+          at "— (not yet launched)" pre-lobby, and its Host-control-panel
+          table makes the launch CTA available from Lobby through Game over.
+          Optional-chained despite the non-optional type: a redeploy briefly
+          runs two instances (store/migrate.go), so this socket can be served
+          a snapshot built before the field existed, and there is no error
+          boundary to catch the deref. (Code review, 2026-08-09.) */}
+      <DisplayControls
+        gameId={gameId}
+        reducedMotion={snapshot.displaySettings?.reducedMotion ?? false}
+        gameState={snapshot.state}
+      />
 
       <p className="text-host-text">
         {strings.lobby.participantCountLabel(snapshot.participantCount)}
