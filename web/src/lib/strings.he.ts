@@ -36,6 +36,7 @@ export const strings = {
     emptyStateTitle: 'עוד אין כאן משחקים.',
     emptyStateBody: 'המשחק הראשון שלכם במרחק לחיצה אחת.',
     loadError: 'טעינת המשחקים נכשלה. רעננו את הדף או נסו שוב בעוד רגע.',
+    finishedBadge: 'הסתיים',
   },
   createGame: {
     dialogTitle: 'משחק חדש',
@@ -160,5 +161,28 @@ export const strings = {
     actionConflict: 'מצב המשחק השתנה בינתיים. הלוח יתעדכן אוטומטית.',
     gradingIncomplete: 'עדיין בודקים חלק מהתשובות. נסו שוב בעוד רגע.',
     startGameNoQuestions: 'הוסיפו לפחות שאלה אחת כדי להתחיל את המשחק.',
+  },
+  // [ASSUMPTION]: EXPERIENCE.md specifies the post-game results surface
+  // ("Final Leaderboard + per-question response rates on screen. No
+  // export") but not its copy — authored to the Host-microcopy rules
+  // (direct, terse, no apology, no emoji) and flagged for Avraham to
+  // confirm/replace.
+  results: {
+    title: 'סיכום המשחק',
+    leaderboardTitle: 'טבלת התוצאות',
+    questionsTitle: 'שיעור מענה לפי שאלה',
+    rankColumn: 'מקום',
+    participantColumn: 'משתתף',
+    scoreColumn: 'ניקוד',
+    questionColumn: 'שאלה',
+    answeredColumn: 'ענו',
+    correctColumn: 'צדקו',
+    responseRate: (answered: number, players: number) => `${answered} מתוך ${players}`,
+    playerCountLabel: (count: number) =>
+      count === 1 ? 'משתתף אחד שיחק' : `${count} משתתפים שיחקו`,
+    noPlayers: 'אף אחד לא נרשם למשחק הזה.',
+    noQuestions: 'לא היו שאלות במשחק הזה.',
+    notFinished: 'המשחק עוד לא הסתיים. הסיכום יופיע כאן בסופו.',
+    loadError: 'טעינת סיכום המשחק נכשלה. נסו שוב בעוד רגע.',
   },
 } as const

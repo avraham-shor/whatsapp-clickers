@@ -382,6 +382,84 @@ func (q *Queries) ListAnswersForScoring(ctx context.Context, arg ListAnswersForS
 	return items, nil
 }
 
+const listQuestionResponseStats = `-- name: ListQuestionResponseStats :many
+SELECT q.id AS question_id, q.position, q.type, q.text,
+       count(a.id)::int AS answered_count,
+       (count(a.id) FILTER (WHERE a.is_correct))::int AS correct_count
+FROM questions q
+JOIN games g ON g.id = q.game_id
+LEFT JOIN answers a ON a.question_id = q.id
+WHERE q.game_id = $1 AND g.organizer_id = $2
+GROUP BY q.id
+ORDER BY q.position, q.created_at
+`
+
+type ListQuestionResponseStatsParams struct {
+	GameID      string
+	OrganizerID string
+}
+
+type ListQuestionResponseStatsRow struct {
+	QuestionID    string
+	Position      int32
+	Type          string
+	Text          string
+	AnsweredCount int32
+	CorrectCount  int32
+}
+
+// Per-question post-game response stats for the Organizer's results
+// summary (FR-14, story 3.10). One row per Question in the game,
+// including Questions that received no answers at all — the LEFT JOIN is
+// what makes a never-answered Question appear with 0 rather than vanish,
+// and a game stopped early leaves several of those.
+//
+// Organizer-scoped through games.organizer_id, same posture as
+// ListQuestionsByGame (questions.sql): a foreign game is unreachable by
+// construction, not merely unauthorized at the handler.
+//
+// correct_count deliberately uses FILTER (WHERE a.is_correct), which
+// excludes NULL: an answer still ungraded (stage IS NULL, story 3.6's
+// async AI path) counts as answered but not as correct. That is the
+// honest reading — the same row would read as a false "wrong" through a
+// bare `.Bool`, the posture deferred-work.md records against
+// ListAnswerResultsForQuestion. A finished game normally has none, since
+// Reveal is gated on zero pending grades, but a game stopped from
+// question_open can absolutely leave some.
+//
+// No ORDER BY q.created_at ambiguity to resolve here, unlike
+// ListAnswersForScoring/ListAnswerResultsForQuestion: those pick ONE
+// question by position and needed a LIMIT 1 subquery to do it. This one
+// lists every question, so two rows sharing a position (00003
+// deliberately declines UNIQUE (game_id, position)) simply appear as two
+// rows, ordered identically to ListQuestionsByGame.
+func (q *Queries) ListQuestionResponseStats(ctx context.Context, arg ListQuestionResponseStatsParams) ([]ListQuestionResponseStatsRow, error) {
+	rows, err := q.db.Query(ctx, listQuestionResponseStats, arg.GameID, arg.OrganizerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuestionResponseStatsRow
+	for rows.Next() {
+		var i ListQuestionResponseStatsRow
+		if err := rows.Scan(
+			&i.QuestionID,
+			&i.Position,
+			&i.Type,
+			&i.Text,
+			&i.AnsweredCount,
+			&i.CorrectCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordAnswer = `-- name: RecordAnswer :one
 INSERT INTO answers (question_id, participant_id, response, received_at, is_correct, stage)
 SELECT $1, $2, $3, $4, $5, $6

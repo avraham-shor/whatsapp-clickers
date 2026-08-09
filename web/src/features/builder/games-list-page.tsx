@@ -55,7 +55,11 @@ export function GamesListPage() {
           {games.data.items.map((game) => (
             <li key={game.id}>
               <Link
-                to={`/games/${game.id}`}
+                // A finished game's editor is pointless — its card leads to
+                // the results summary instead (FR-14). This is the
+                // navigation half of the durability AC: a URL nobody can
+                // reach after signing in again is not "accessible".
+                to={game.state === 'finished' ? `/games/${game.id}/results` : `/games/${game.id}`}
                 className="flex flex-col gap-2 rounded-md border border-host-border bg-surface-raised p-6 hover:border-green-800"
               >
                 <div className="flex items-center justify-between gap-4">
@@ -73,6 +77,13 @@ export function GamesListPage() {
                 </div>
                 <div className="flex items-center gap-4 text-sm text-host-text-secondary">
                   <span>{strings.gamesList.questionsCount(game.questionCount)}</span>
+                  {/* Visible cue so the changed destination is not a silent
+                      surprise. */}
+                  {game.state === 'finished' && (
+                    <span className="rounded-full border border-border-light bg-green-50 px-3 py-1 text-green-800">
+                      {strings.gamesList.finishedBadge}
+                    </span>
+                  )}
                   <span>{dateFormat.format(new Date(game.createdAt))}</span>
                 </div>
               </Link>

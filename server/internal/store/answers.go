@@ -204,6 +204,46 @@ func (s *Store) GetLeaderboard(ctx context.Context, gameID string) ([]Participan
 	return out, nil
 }
 
+// QuestionResponseStats is one Question's post-game response summary —
+// how many Participants answered it and how many of those were correct
+// (FR-14, story 3.10). The response *rate*'s denominator is not here:
+// it is the game's player count, which the caller already holds from
+// GetLeaderboard (one row per role='player' Participant), so this query
+// does not re-derive it per question.
+type QuestionResponseStats struct {
+	QuestionID    string
+	Position      int32
+	Type          string
+	Text          string
+	AnsweredCount int32
+	CorrectCount  int32
+}
+
+// ListQuestionResponseStats returns one row per Question in gameID, in
+// the same order as ListQuestionsByGame, including Questions nobody
+// answered. Organizer-scoped in SQL; a foreign or missing game yields an
+// empty slice, not an error (a :many with no rows is not ErrNoRows) —
+// the caller has already resolved ownership via GetGameForOrganizer, so
+// this is belt-and-braces rather than the authorization check itself.
+func (s *Store) ListQuestionResponseStats(ctx context.Context, gameID, organizerID string) ([]QuestionResponseStats, error) {
+	rows, err := s.q.ListQuestionResponseStats(ctx, gen.ListQuestionResponseStatsParams{GameID: gameID, OrganizerID: organizerID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]QuestionResponseStats, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, QuestionResponseStats{
+			QuestionID:    r.QuestionID,
+			Position:      r.Position,
+			Type:          r.Type,
+			Text:          r.Text,
+			AnsweredCount: r.AnsweredCount,
+			CorrectCount:  r.CorrectCount,
+		})
+	}
+	return out, nil
+}
+
 // AnswerResultRow is one answering Participant's phone/correctness/points
 // for a just-revealed question — game.Engine.ResultsForRevealedQuestion's
 // raw input (story 3.8, FR-6).
