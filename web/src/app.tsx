@@ -9,6 +9,7 @@ import { GamesListPage } from '@/features/builder/games-list-page'
 import { GameEditorPage } from '@/features/builder/game-editor-page'
 import { LobbyPage } from '@/features/lobby/lobby-page'
 import { ResultsPage } from '@/features/results/results-page'
+import { DisplayPage } from '@/features/display/display-page'
 
 interface Organizer {
   id: string
@@ -62,6 +63,14 @@ function NotFoundPage() {
 // plain route elements, no loaders.
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  // Top-level, outside BOTH RequireAuth and DashboardLayout, deliberately
+  // (FR-9, story 4.1): DashboardLayout's sidebar/brand/logout is not the
+  // surface a projector shows, and RequireAuth's REST session probe would
+  // make a REST round trip the precondition for the first paint — which
+  // the AC rules out. The WS handshake is already the stronger auth gate
+  // (ws/handler.go rejects a missing/invalid session before the upgrade),
+  // and api()'s default 401 handling redirects this window to /login.
+  { path: '/display/:gameId', element: <DisplayPage /> },
   {
     element: <RequireAuth />,
     children: [

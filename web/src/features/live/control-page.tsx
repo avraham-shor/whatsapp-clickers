@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 // is a feature view, not shared logic).
 import { ResultsSummary } from '@/features/results/results-summary'
 import { ResponseStats } from './response-stats'
+import { DisplayControls } from './display-controls'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -122,6 +123,13 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
     return (
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <h1 className="text-2xl font-heading text-host-text">{strings.live.gameOverTitle}</h1>
+        {/* Game over is inside the launch CTA's window (EXPERIENCE.md's
+            Host-control-panel table: Lobby through Game over). */}
+        <DisplayControls
+          gameId={gameId}
+          reducedMotion={snapshot.displaySettings?.reducedMotion ?? false}
+          gameState={snapshot.state}
+        />
         <ResultsSummary gameId={gameId} />
         <Link to="/" className="text-green-800 underline">
           {strings.gameEditor.backToGames}
@@ -208,6 +216,21 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
           </AlertDialog>
         )}
       </div>
+
+      {/* The launch CTA and the room-level motion toggle stay available for
+          the whole live run (EXPERIENCE.md's Host-control-panel table:
+          Lobby through Game over), so they render below the primary CTA
+          row rather than only in the finished branch above.
+          Optional-chained despite the non-optional type: a redeploy briefly
+          runs two instances (store/migrate.go), so this socket can be served
+          a snapshot built before the field existed, and there is no error
+          boundary — an unguarded deref would take down the organizer's live
+          panel mid-game. (Code review, 2026-08-09.) */}
+      <DisplayControls
+        gameId={gameId}
+        reducedMotion={snapshot.displaySettings?.reducedMotion ?? false}
+        gameState={snapshot.state}
+      />
     </div>
   )
 }

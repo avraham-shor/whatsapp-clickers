@@ -89,6 +89,11 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, we
 						gr.Post("/reveal", handleReveal(engine, hub, resultDispatcher))
 						gr.Post("/next-question", handleNextQuestion(engine, hub, dispatcher, finalDispatcher))
 						gr.Post("/stop", handleStopGame(engine, hub, finalDispatcher))
+						// Inside the guard deliberately, unlike /results
+						// above: this route genuinely needs both the
+						// engine and the hub, so a test router passing
+						// nil for either must not expose it.
+						gr.Put("/display-settings", handleUpdateDisplaySettings(engine, hub))
 					}
 					gr.Route("/questions", func(qr chi.Router) {
 						qr.Post("/", handleCreateQuestion(games))

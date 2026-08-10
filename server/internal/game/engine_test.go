@@ -112,6 +112,15 @@ type stubStore struct {
 		isCorrect bool
 		stage     string
 	}
+
+	updateGameDisplaySettingsResult gen.Game
+	updateGameDisplaySettingsErr    error
+	updateGameDisplaySettingsCalls  int
+	updateGameDisplaySettingsArg    struct {
+		gameID        string
+		organizerID   string
+		reducedMotion bool
+	}
 }
 
 func (s *stubStore) GetGameForOrganizer(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
@@ -237,6 +246,14 @@ func (s *stubStore) UpdateAnswerGrade(ctx context.Context, answerID string, isCo
 	s.updateAnswerGradeArg.isCorrect = isCorrect
 	s.updateAnswerGradeArg.stage = stage
 	return s.updateAnswerGradeErr
+}
+
+func (s *stubStore) UpdateGameDisplaySettings(ctx context.Context, gameID, organizerID string, reducedMotion bool) (gen.Game, error) {
+	s.updateGameDisplaySettingsCalls++
+	s.updateGameDisplaySettingsArg.gameID = gameID
+	s.updateGameDisplaySettingsArg.organizerID = organizerID
+	s.updateGameDisplaySettingsArg.reducedMotion = reducedMotion
+	return s.updateGameDisplaySettingsResult, s.updateGameDisplaySettingsErr
 }
 
 func draftStub() *stubStore {
@@ -1003,5 +1020,91 @@ func TestPlayerRecipientsStoreErrorPropagates(t *testing.T) {
 	_, err := e.PlayerRecipients(context.Background(), testGameID)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("PlayerRecipients() err = %v, want %v (propagated, wrapped or not)", err, wantErr)
+	}
+}
+
+func TestSetDisplaySettingsPersistsAndSnapshots(t *testing.T) {
+	st := draftStub()
+	st.updateGameDisplaySettingsResult = gen.Game{
+		ID: testGameID, OrganizerID: testOrganizerID, State: StateLobby,
+		JoinCode: "AB2CD3", ReducedMotion: true,
+	}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.SetDisplaySettings(context.Background(), testGameID, testOrganizerID, true)
+	if err != nil {
+		t.Fatalf("SetDisplaySettings() err = %v, want nil", err)
+	}
+	if !snap.DisplaySettings.ReducedMotion {
+		t.Errorf("snapshot.DisplaySettings = %+v, want ReducedMotion true", snap.DisplaySettings)
+	}
+	if snap.State != StateLobby || snap.GameID != testGameID {
+		t.Errorf("snapshot = %+v, want the written row's state/id carried through", snap)
+	}
+	if st.updateGameDisplaySettingsCalls != 1 {
+		t.Errorf("UpdateGameDisplaySettings called %d times, want 1", st.updateGameDisplaySettingsCalls)
+	}
+	arg := st.updateGameDisplaySettingsArg
+	if arg.gameID != testGameID || arg.organizerID != testOrganizerID || !arg.reducedMotion {
+		t.Errorf("UpdateGameDisplaySettings arg = %+v, want (%s, %s, true)", arg, testGameID, testOrganizerID)
+	}
+}
+
+func TestSetDisplaySettingsStoreErrorPropagates(t *testing.T) {
+	st := draftStub()
+	st.updateGameDisplaySettingsErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.SetDisplaySettings(context.Background(), testGameID, testOrganizerID, true)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("SetDisplaySettings() err = %v, want store.ErrNotFound", err)
+	}
+	// Snapshot holds slices, so compare the fields that would be populated
+	// on success rather than the struct itself.
+	if snap.GameID != "" || snap.State != "" || snap.Participants != nil || snap.Leaderboard != nil {
+		t.Errorf("snapshot = %+v, want the zero Snapshot on error", snap)
+	}
+}
+
+// SetDisplaySettings is the one write path that must NOT degrade a failed
+// snapshot build to emptySnapshot. Its caller broadcasts what it returns,
+// and emptySnapshot blanks the roster, the current question and the
+// leaderboard — so degrading here would let a cosmetic toggle wipe the
+// room's screen, including on a finished game that never re-broadcasts to
+// self-correct. Nothing committed but one boolean, so the error is the
+// honest answer. (Code review, 2026-08-09.)
+func TestSetDisplaySettingsDoesNotDegradeOnBuildFailure(t *testing.T) {
+	st := draftStub()
+	st.updateGameDisplaySettingsResult = gen.Game{
+		ID: testGameID, OrganizerID: testOrganizerID, State: StateLobby,
+		JoinCode: "AB2CD3", ReducedMotion: true,
+	}
+	boom := errors.New("questions unavailable")
+	st.listQuestionsByGameErr = boom
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.SetDisplaySettings(context.Background(), testGameID, testOrganizerID, true)
+	if !errors.Is(err, boom) {
+		t.Fatalf("SetDisplaySettings() err = %v, want the build error propagated (never a degraded snapshot)", err)
+	}
+	if snap.GameID != "" || snap.State != "" {
+		t.Errorf("snapshot = %+v, want the zero Snapshot — a degraded emptySnapshot here would be broadcast to the room", snap)
+	}
+	if st.updateGameDisplaySettingsCalls != 1 {
+		t.Errorf("UpdateGameDisplaySettings called %d times, want 1 (the write still commits; only the snapshot fails)", st.updateGameDisplaySettingsCalls)
+	}
+}
+
+// The degraded fallback must not silently flip the room's motion setting
+// back to animated: emptySnapshot carries reduced_motion from the row for
+// the same reason it carries State/JoinCode. This is the only test that
+// can catch that one line going missing.
+func TestEmptySnapshotCarriesDisplaySettings(t *testing.T) {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateLobby, JoinCode: "AB2CD3", ReducedMotion: true}
+
+	snap := emptySnapshot("+972 50-000-0000", g)
+
+	if !snap.DisplaySettings.ReducedMotion {
+		t.Errorf("emptySnapshot DisplaySettings = %+v, want ReducedMotion true carried from the row", snap.DisplaySettings)
 	}
 }

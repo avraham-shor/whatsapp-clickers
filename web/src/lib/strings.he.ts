@@ -161,6 +161,23 @@ export const strings = {
     actionConflict: 'מצב המשחק השתנה בינתיים. הלוח יתעדכן אוטומטית.',
     gradingIncomplete: 'עדיין בודקים חלק מהתשובות. נסו שוב בעוד רגע.',
     startGameNoQuestions: 'הוסיפו לפחות שאלה אחת כדי להתחיל את המשחק.',
+    // Display controls. The launch CTA matches EXPERIENCE.md's
+    // Host-microcopy row character for character, but note that the row
+    // itself is marked [ASSUMPTION] there and records a rejected
+    // alternative ("הצג מצב מקרן") — so "verbatim" describes the
+    // transcription, not a settled decision. "הפחת אנימציות" is the
+    // Display-controls wording and carries no marker in the source. The
+    // hint, the error and the popup-blocked message were authored to the
+    // Host-microcopy rules. All four confirmed by Avraham at 4.1's code
+    // review (2026-08-09), so none is [ASSUMPTION] any more.
+    openDisplayCta: 'פתח מסך קהל',
+    // Shown only when the browser refuses the popup — without it a
+    // locked-down venue browser makes the launch CTA a silent no-op in
+    // front of a room (code review, 2026-08-09).
+    openDisplayBlocked: 'הדפדפן חסם את חלון מסך הקהל. אפשרו חלונות קופצים לאתר הזה ונסו שוב.',
+    reduceMotionLabel: 'הפחת אנימציות',
+    reduceMotionHint: 'מבטל תנועה במסך הקהל עבור כל החדר.',
+    reduceMotionError: 'שינוי ההגדרה לא נשמר. נסו שוב בעוד רגע.',
   },
   // [ASSUMPTION]: EXPERIENCE.md specifies the post-game results surface
   // ("Final Leaderboard + per-question response rates on screen. No
@@ -184,5 +201,39 @@ export const strings = {
     noQuestions: 'לא היו שאלות במשחק הזה.',
     notFinished: 'המשחק עוד לא הסתיים. הסיכום יופיע כאן בסופו.',
     loadError: 'טעינת סיכום המשחק נכשלה. נסו שוב בעוד רגע.',
+  },
+  // EXPERIENCE.md specifies the display's resilience behavior
+  // ("מתחבר מחדש..." over the last rendered state) and its stage
+  // inventory, but no copy for a stage that has not been built yet or for
+  // a display opened on an unknown game. Those were authored to the
+  // Host-microcopy rules (direct, terse, no apology, no emoji) and
+  // confirmed by Avraham at 4.1's code review (2026-08-09) — no longer
+  // [ASSUMPTION].
+  display: {
+    // First connect, nothing rendered yet. Matches common.connecting
+    // deliberately: the epic AC quotes "מתחבר...".
+    connecting: 'מתחבר…',
+    // Reconnect, over the last rendered stage — EXPERIENCE.md's
+    // Resilience row wording.
+    reconnecting: 'מתחבר מחדש…',
+    notFound: 'המשחק הזה לא נמצא.',
+    // Every stage until its own story lands (4.2–4.6), plus `draft`
+    // permanently — a display opened before the lobby is.
+    waiting: 'המסך מוכן — ממתינים למארגן.',
+    // Screen-reader state names for the aria-live announcer (UX-DR14),
+    // keyed by the canonical GameState strings so the switcher and the
+    // announcer can never drift apart. Because `strings` is `as const`,
+    // indexing this with a GameState-typed value is itself the
+    // exhaustiveness check — a missing key is a compile error. Do not
+    // add a `?? ''` fallback; it would disarm that check.
+    stateAnnouncement: {
+      draft: 'המשחק עוד לא נפתח',
+      lobby: 'הרשמה פתוחה',
+      question_open: 'שאלה פתוחה',
+      question_closed: 'השאלה נסגרה',
+      revealed: 'התשובה נחשפה',
+      leaderboard: 'טבלת התוצאות',
+      finished: 'המשחק הסתיים',
+    },
   },
 } as const

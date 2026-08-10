@@ -16,7 +16,7 @@ SET state = 'question_closed',
     answer_cutoff_at = LEAST(answer_cutoff_at, now()),
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2 AND state = 'question_open'
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion
 `
 
 type CloseCurrentQuestionParams struct {
@@ -44,6 +44,7 @@ func (q *Queries) CloseCurrentQuestion(ctx context.Context, arg CloseCurrentQues
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
@@ -51,7 +52,7 @@ func (q *Queries) CloseCurrentQuestion(ctx context.Context, arg CloseCurrentQues
 const createGame = `-- name: CreateGame :one
 INSERT INTO games (organizer_id, title, join_code)
 VALUES ($1, $2, $3)
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion
 `
 
 type CreateGameParams struct {
@@ -77,6 +78,7 @@ func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, e
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
@@ -87,7 +89,7 @@ SET state = 'finished',
     current_question_position = 0,
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2 AND state IN ('question_open','question_closed','revealed')
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion
 `
 
 type FinishGameParams struct {
@@ -118,12 +120,13 @@ func (q *Queries) FinishGame(ctx context.Context, arg FinishGameParams) (Game, e
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
 
 const getGameByID = `-- name: GetGameByID :one
-SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at FROM games WHERE id = $1
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion FROM games WHERE id = $1
 `
 
 // Unscoped by organizer_id for the same reason as GetGameByJoinCode: this
@@ -150,12 +153,13 @@ func (q *Queries) GetGameByID(ctx context.Context, id string) (Game, error) {
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
 
 const getGameByJoinCode = `-- name: GetGameByJoinCode :one
-SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at FROM games WHERE join_code = $1
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion FROM games WHERE join_code = $1
 `
 
 // Unscoped by organizer_id on purpose: a Participant's JOIN message carries
@@ -181,12 +185,13 @@ func (q *Queries) GetGameByJoinCode(ctx context.Context, joinCode string) (Game,
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
 
 const getGameForOrganizer = `-- name: GetGameForOrganizer :one
-SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at FROM games
+SELECT id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion FROM games
 WHERE id = $1 AND organizer_id = $2
 `
 
@@ -214,12 +219,13 @@ func (q *Queries) GetGameForOrganizer(ctx context.Context, arg GetGameForOrganiz
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
 
 const listGamesByOrganizer = `-- name: ListGamesByOrganizer :many
-SELECT g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at, count(q.id) AS question_count
+SELECT g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at, g.reduced_motion, count(q.id) AS question_count
 FROM games g
 LEFT JOIN questions q ON q.game_id = g.id
 WHERE g.organizer_id = $1
@@ -241,6 +247,7 @@ type ListGamesByOrganizerRow struct {
 	SpeedBonusThird         int32
 	CurrentQuestionPosition int32
 	AnswerCutoffAt          time.Time
+	ReducedMotion           bool
 	QuestionCount           int64
 }
 
@@ -267,6 +274,7 @@ func (q *Queries) ListGamesByOrganizer(ctx context.Context, organizerID string) 
 			&i.SpeedBonusThird,
 			&i.CurrentQuestionPosition,
 			&i.AnswerCutoffAt,
+			&i.ReducedMotion,
 			&i.QuestionCount,
 		); err != nil {
 			return nil, err
@@ -284,7 +292,7 @@ UPDATE games
 SET state = 'lobby',
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2 AND state = 'draft'
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion
 `
 
 type OpenGameLobbyParams struct {
@@ -311,6 +319,7 @@ func (q *Queries) OpenGameLobby(ctx context.Context, arg OpenGameLobbyParams) (G
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
@@ -324,7 +333,7 @@ SET state = 'question_open',
 FROM questions q
 WHERE g.id = $2 AND g.organizer_id = $3 AND g.state = 'revealed'
   AND q.game_id = g.id AND q.position = $1
-RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at
+RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at, g.reduced_motion
 `
 
 type OpenNextQuestionParams struct {
@@ -353,6 +362,7 @@ func (q *Queries) OpenNextQuestion(ctx context.Context, arg OpenNextQuestionPara
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
@@ -365,7 +375,7 @@ FROM questions q
 WHERE g.id = $1 AND g.organizer_id = $2 AND g.state = 'question_closed'
   AND q.game_id = g.id AND q.position = g.current_question_position
   AND NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.stage IS NULL)
-RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at
+RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at, g.reduced_motion
 `
 
 type RevealCurrentQuestionParams struct {
@@ -399,6 +409,7 @@ func (q *Queries) RevealCurrentQuestion(ctx context.Context, arg RevealCurrentQu
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
@@ -412,7 +423,7 @@ SET state = 'question_open',
 FROM questions q
 WHERE g.id = $1 AND g.organizer_id = $2 AND g.state = 'lobby'
   AND q.game_id = g.id AND q.position = 1
-RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at
+RETURNING g.id, g.organizer_id, g.title, g.join_code, g.state, g.created_at, g.updated_at, g.points_per_correct, g.speed_bonus_first, g.speed_bonus_second, g.speed_bonus_third, g.current_question_position, g.answer_cutoff_at, g.reduced_motion
 `
 
 type StartGameFirstQuestionParams struct {
@@ -442,6 +453,47 @@ func (q *Queries) StartGameFirstQuestion(ctx context.Context, arg StartGameFirst
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
+	)
+	return i, err
+}
+
+const updateGameDisplaySettings = `-- name: UpdateGameDisplaySettings :one
+UPDATE games
+SET reduced_motion = $3,
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion
+`
+
+type UpdateGameDisplaySettingsParams struct {
+	ID            string
+	OrganizerID   string
+	ReducedMotion bool
+}
+
+// Room-level display settings (FR-9). Deliberately NOT state-guarded,
+// unlike OpenGameLobby and the question mutations: this is legal in
+// every state from lobby through finished (EXPERIENCE.md's Display
+// controls row), so a state predicate here would be wrong, not missing.
+func (q *Queries) UpdateGameDisplaySettings(ctx context.Context, arg UpdateGameDisplaySettingsParams) (Game, error) {
+	row := q.db.QueryRow(ctx, updateGameDisplaySettings, arg.ID, arg.OrganizerID, arg.ReducedMotion)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.JoinCode,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PointsPerCorrect,
+		&i.SpeedBonusFirst,
+		&i.SpeedBonusSecond,
+		&i.SpeedBonusThird,
+		&i.CurrentQuestionPosition,
+		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }
@@ -454,7 +506,7 @@ SET points_per_correct = $3,
     speed_bonus_third = $6,
     updated_at = now()
 WHERE id = $1 AND organizer_id = $2
-RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at
+RETURNING id, organizer_id, title, join_code, state, created_at, updated_at, points_per_correct, speed_bonus_first, speed_bonus_second, speed_bonus_third, current_question_position, answer_cutoff_at, reduced_motion
 `
 
 type UpdateGameScoringParams struct {
@@ -490,6 +542,7 @@ func (q *Queries) UpdateGameScoring(ctx context.Context, arg UpdateGameScoringPa
 		&i.SpeedBonusThird,
 		&i.CurrentQuestionPosition,
 		&i.AnswerCutoffAt,
+		&i.ReducedMotion,
 	)
 	return i, err
 }

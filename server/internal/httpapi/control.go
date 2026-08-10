@@ -21,6 +21,7 @@ type ControlEngine interface {
 	PlayerRecipients(ctx context.Context, gameID string) ([]string, error)
 	ResultsForRevealedQuestion(ctx context.Context, gameID, organizerID string, position int32) (game.RevealedQuestionResults, error)
 	ResultsForFinishedGame(ctx context.Context, gameID string) (game.FinalResults, error)
+	SetDisplaySettings(ctx context.Context, gameID, organizerID string, reducedMotion bool) (game.Snapshot, error)
 }
 
 // SnapshotBroadcaster is the fan-out surface handleOpenLobby needs;

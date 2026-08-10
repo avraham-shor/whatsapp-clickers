@@ -13,6 +13,15 @@ type Snapshot struct {
 	QuestionCount    int                  `json:"questionCount"`
 	CurrentQuestion  *CurrentQuestion     `json:"currentQuestion"`
 	Leaderboard      []LeaderboardEntry   `json:"leaderboard"`
+	DisplaySettings  DisplaySettings      `json:"displaySettings"`
+}
+
+// DisplaySettings carries the room-level rendering settings the Audience
+// Display obeys (FR-9, story 4.1). It rides the snapshot rather than a
+// display-side control because the room shares one projector and nobody
+// interacts with it — the Organizer decides for everyone.
+type DisplaySettings struct {
+	ReducedMotion bool `json:"reducedMotion"`
 }
 
 // ParticipantSummary is the participant shape a lobby/live client renders;

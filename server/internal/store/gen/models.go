@@ -36,6 +36,7 @@ type Game struct {
 	SpeedBonusThird         int32
 	CurrentQuestionPosition int32
 	AnswerCutoffAt          time.Time
+	ReducedMotion           bool
 }
 
 type Organizer struct {

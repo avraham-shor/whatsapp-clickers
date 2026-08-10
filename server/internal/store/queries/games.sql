@@ -27,6 +27,17 @@ SET points_per_correct = $3,
 WHERE id = $1 AND organizer_id = $2
 RETURNING *;
 
+-- Room-level display settings (FR-9). Deliberately NOT state-guarded,
+-- unlike OpenGameLobby and the question mutations: this is legal in
+-- every state from lobby through finished (EXPERIENCE.md's Display
+-- controls row), so a state predicate here would be wrong, not missing.
+-- name: UpdateGameDisplaySettings :one
+UPDATE games
+SET reduced_motion = $3,
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2
+RETURNING *;
+
 -- The AND state = 'draft' makes a concurrent double-click race-safe: only
 -- one caller's UPDATE matches a row.
 -- name: OpenGameLobby :one
