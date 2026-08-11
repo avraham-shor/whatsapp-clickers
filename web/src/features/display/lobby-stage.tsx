@@ -1,17 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import { strings } from '@/lib/strings.he'
-// import type, not a value import: display-page.tsx imports this component,
-// so a value import would be a runtime cycle. A type-only import is erased
-// at compile time and is not.
-import type { StageProps } from './display-page'
-
-// EXPERIENCE.md's Accessibility Floor: counters are polite AND throttled —
-// "announce at most every 5s or at milestones". Module scope, not component
-// scope, so it is a stable value the announcing effect can close over without
-// becoming a dependency. The milestone half is deliberately not implemented:
-// nothing in the spec defines what counts as one (code review, 4.2).
-const announceIntervalMs = 5000
+import { useThrottledAnnouncement } from '@/lib/use-throttled-announcement'
+import type { StageProps } from './stage-props'
 
 /**
  * The lobby stage (FR-10, UJ-1): how to join, in the largest type the
@@ -52,53 +43,11 @@ export function LobbyStage({ snapshot }: StageProps) {
   // display-page.tsx:94-96 states the same mechanism correctly.)
   const count = Math.max(highWater, snapshot.participantCount)
 
-  // The region mounts EMPTY and announces a CHANGE, never the state it found
-  // on arrival. Assistive tech does not announce content already present when
-  // a live region first appears - 4.1's code review found exactly that bug on
-  // the shell's state announcer, so seeding this with `count` would silently
-  // swallow the first announcement.
-  const [announced, setAnnounced] = useState<number | null>(null)
-  // The count this stage arrived to. Nobody joined while the room was
-  // watching, so it is the baseline rather than the first announcement.
-  // Without it, the common case - a lobby opening at 0 - announced
-  // countAnnouncement(0), a non-event announced as an event (code review,
-  // 4.2).
-  const mountedAt = useRef(count)
-  // Wall clock of the last announcement, so the throttle window survives
-  // re-renders instead of restarting with them. 0 means "never announced",
-  // which is what makes the first change fire immediately.
-  const lastAnnouncedAt = useRef(0)
-  // Latest-ref via effect (the same pattern display-controls.tsx uses):
-  // writing a ref in an effect body is allowed, reading one during
-  // render is not.
-  const countRef = useRef(count)
-  useEffect(() => {
-    countRef.current = count
-  })
-  // EXPERIENCE.md's Accessibility Floor: "announce at most every 5s". That is
-  // an upper bound on FREQUENCY, which a leading edge respects - so the first
-  // join is read out at once and later ones wait out the remainder of the
-  // window, announcing whatever the count has reached by then.
-  //
-  // A bare setInterval was the original shape and it failed the scenario the
-  // requirement exists for: its only tick was scheduled 5s after mount, so a
-  // room that filled and started inside 5s announced nothing at all before
-  // the state transition unmounted the stage (code review, 4.2).
-  //
-  // setState inside the timeout callback is async, so it does not trip
-  // react-hooks/set-state-in-effect. Re-running on every `count` change is
-  // deliberate and safe here: the cleanup clears the pending timer and the
-  // recomputed `wait` preserves the original window rather than restarting
-  // it, so a fast-filling lobby still announces on schedule.
-  useEffect(() => {
-    if (count === mountedAt.current || announced === count) return
-    const wait = Math.max(0, announceIntervalMs - (Date.now() - lastAnnouncedAt.current))
-    const id = setTimeout(() => {
-      lastAnnouncedAt.current = Date.now()
-      setAnnounced(countRef.current)
-    }, wait)
-    return () => clearTimeout(id)
-  }, [count, announced])
+  // Polite, leading-edge, at most once per 5s. Extracted to lib at story 4.3
+  // when the question stage's answered count became the second caller — the
+  // hook carries every comment that used to sit here, each recording a bug
+  // this counter actually shipped.
+  const announced = useThrottledAnnouncement(count)
 
   return (
     <>

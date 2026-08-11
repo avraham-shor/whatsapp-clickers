@@ -256,5 +256,33 @@ export const strings = {
       // reader gets no layout to carry the meaning.
       countAnnouncement: (count: number) => `${count} הצטרפו למשחק`,
     },
+    // Question stage (story 4.3).
+    //
+    // questionProgress and answeredStat are NOT redefined here: `live`
+    // already holds `שאלה ${n} מתוך ${total}` and `${count} ענו`, which are
+    // the exact sentences mockups/key-stage-question.html puts in the hero
+    // band and EXPERIENCE.md quotes for BOTH surfaces. The question stage
+    // imports them from `live`. Two blocks holding one sentence is a drift
+    // risk, and this module's block names are organisational, not
+    // access-controlled.
+    question: {
+      // EXPERIENCE.md IA > Audience Display - stages, Free-Text row, and the
+      // epic AC, both verbatim. Not an assumption.
+      freeTextHint: 'כתבו את התשובה בוואטסאפ',
+      // The option letter as the mockup renders it ("א."). The LETTERS come
+      // from questionEditor.optionLetters; only the trailing period lives
+      // here, so the two surfaces cannot drift on the alphabet.
+      optionLetter: (letter: string) => `${letter}.`,
+      // [ASSUMPTION]: EXPERIENCE.md's Accessibility Floor requires the count
+      // to be polite and throttled but gives no sentence. A full sentence,
+      // unlike the visual "63 ענו", because a screen reader gets no layout to
+      // carry the meaning - the same reasoning as display.lobby.countAnnouncement.
+      countAnnouncement: (count: number) => `${count} ענו על השאלה`,
+      // [ASSUMPTION]: EXPERIENCE.md's Accessibility Floor says the timer
+      // numeral is announced "only at question open and the ≤5s threshold"
+      // but gives no wording. Gender-neutral (A2), no digit read out - the
+      // threshold is the event, not the number.
+      urgentAnnouncement: 'חמש שניות אחרונות',
+    },
   },
 } as const
