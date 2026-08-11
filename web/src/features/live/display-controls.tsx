@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { strings } from '@/lib/strings.he'
 import type { GameState } from '@/lib/types'
+import { useSingleFlight } from '@/lib/use-single-flight'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 
@@ -43,24 +44,13 @@ export function DisplayControls({ gameId, reducedMotion, gameState }: DisplayCon
       }),
   })
 
-  // A plain ref, not isPending: React Query does not flip isPending
-  // synchronously inside mutate(), so a second change arriving before the
-  // next render reads a stale false and fires twice. Two concurrent PUTs
-  // race to decide both the persisted value and the last broadcast, and
-  // they are easy to trigger here precisely because the checkbox has no
-  // local echo — it snaps back for the whole round trip, which reads as
-  // broken and invites a second click. Same guard as control-page.tsx's
-  // fire() and lobby-page.tsx's fireStart. (Code review, 2026-08-09.)
-  const submittingRef = useRef(false)
-  const submit = (next: boolean) => {
-    if (submittingRef.current) return
-    submittingRef.current = true
-    setReducedMotion.mutate(next, {
-      onSettled: () => {
-        submittingRef.current = false
-      },
-    })
-  }
+  // Single-flight, for the reason recorded at 2026-08-09's code review:
+  // two concurrent PUTs race to decide both the persisted value and the
+  // last broadcast, and they are easy to trigger here precisely because
+  // the checkbox has no local echo — it snaps back for the whole round
+  // trip, which reads as broken and invites a second click. Same shared
+  // guard as control-page.tsx's fire() and lobby-page.tsx's fireStart.
+  const submit = useSingleFlight(setReducedMotion)
 
   // Clears a stale failure once the live state advances — the same reason
   // control-page.tsx resets its own banners on [snapshot.state]: a banner

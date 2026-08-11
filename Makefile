@@ -19,9 +19,10 @@ build:
 	cp -r web/dist/. server/internal/webdist/dist/
 	cd server && go build -o bin/server ./cmd/server
 
-## test: backend test suite
+## test: backend + frontend test suites
 test:
 	cd server && go test ./...
+	cd web && npm test
 
 ## generate: regenerate sqlc output (commit the result)
 generate:

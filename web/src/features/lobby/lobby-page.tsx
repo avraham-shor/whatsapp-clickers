@@ -1,10 +1,10 @@
-import { useCallback, useRef } from 'react'
 import { Link, useParams } from 'react-router'
 import { useMutation } from '@tanstack/react-query'
 
 import { api, ApiError } from '@/lib/api'
 import { strings } from '@/lib/strings.he'
 import { useGameSocket } from '@/lib/use-game-socket'
+import { useSingleFlight } from '@/lib/use-single-flight'
 import { useSpaceAction } from '@/lib/use-space-action'
 import { Button } from '@/components/ui/button'
 import { ControlPage } from '@/features/live/control-page'
@@ -35,16 +35,11 @@ export function LobbyPage() {
   const startGameConflict =
     startGame.error instanceof ApiError && startGame.error.status === 409 && !startGameNoQuestions
 
-  // Same ref-guard shape as ControlPage's fire(): a plain ref instead of
-  // startGame.isPending, which React Query doesn't flip synchronously
-  // inside mutate() — a rapid double-press (or Space racing a click) could
-  // otherwise read a stale, still-false isPending and fire twice.
-  const startSubmittingRef = useRef(false)
-  const fireStart = useCallback(() => {
-    if (startSubmittingRef.current) return
-    startSubmittingRef.current = true
-    startGame.mutate(undefined, { onSettled: () => { startSubmittingRef.current = false } })
-  }, [startGame])
+  // Same shared single-flight guard as ControlPage's fire(). This surface
+  // has no reset() effect, so it was never stranded by story 3.11's bug —
+  // it is converted so the third copy of the pattern cannot become the
+  // fourth instance of it, and so one test covers every call site.
+  const fireStart = useSingleFlight(startGame)
   useSpaceAction(fireStart, snapshot?.state === 'lobby' && snapshot.questionCount > 0)
 
   // socketNotFound covers the common case (a foreign/mistyped/deleted
@@ -127,8 +122,11 @@ export function LobbyPage() {
           click starts (same fix as ControlPage's persistent button);
           fireStart's ref guards the double-submit instead. Disabled only
           for a real, non-transient reason: no questions to start with. */}
+      {/* Wrapped rather than passed directly: fireStart's parameter is
+          `void` here, and under strictFunctionTypes a `(v: void) => void`
+          is not assignable to onClick's `(e: MouseEvent) => void`. */}
       <Button
-        onClick={fireStart}
+        onClick={() => fireStart()}
         disabled={snapshot.questionCount === 0}
         className="h-10 bg-green-800 text-ink-on-dark hover:bg-green-900"
       >

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router'
 import { useMutation } from '@tanstack/react-query'
 
 import { api, ApiError } from '@/lib/api'
 import { strings } from '@/lib/strings.he'
+import { useSingleFlight } from '@/lib/use-single-flight'
 import { useSpaceAction } from '@/lib/use-space-action'
 import type { LobbySnapshot } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -72,20 +73,7 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
   // match that first and show the less specific message.
   const gradingIncomplete = action.error instanceof ApiError && action.error.code === 'GRADING_INCOMPLETE'
 
-  // A plain ref, not action.isPending: React Query doesn't flip isPending
-  // synchronously inside mutate(), so a second call arriving before the next
-  // render (a rapid double-press, or Space racing a click) would read the
-  // still-false isPending from a stale closure and fire twice. The ref is
-  // set/cleared synchronously around the call, immune to that timing gap.
-  const submittingRef = useRef(false)
-  const fire = useCallback(
-    (path: string) => {
-      if (submittingRef.current) return
-      submittingRef.current = true
-      action.mutate(path, { onSettled: () => { submittingRef.current = false } })
-    },
-    [action],
-  )
+  const fire = useSingleFlight(action)
 
   useSpaceAction(() => {
     if (primary) fire(primary.path)
