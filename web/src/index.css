@@ -284,18 +284,27 @@
   to   { opacity: 1; }
 }
 
-/* --stage-timer-circumference is set inline on the <circle> from the same
-   constant its strokeDasharray uses, so the two can never disagree.
+/* --stage-timer-sweep-end is set inline on the <circle> from the same
+   constant its strokeDasharray uses, so the dasharray and the final offset
+   can never disagree.
 
-   The target offset is NEGATIVE, and that sign is the whole direction of the
-   sweep. An SVG <circle>'s path starts at 3 o'clock and advances clockwise,
-   and the element's rotate(-90) puts that start at 12 o'clock; a POSITIVE
-   dashoffset then retracts the arc's far end, so the ring empties
+   It carries the NEGATIVE circumference, and that sign is the whole direction
+   of the sweep. An SVG <circle>'s path starts at 3 o'clock and advances
+   clockwise, and the element's rotate(-90) puts that start at 12 o'clock; a
+   POSITIVE dashoffset then retracts the arc's far end, so the ring empties
    12 -> 9 -> 6 -> 3, i.e. COUNTERCLOCKWISE - the opposite of the clockwise
    countdown convention timer-ring.tsx says it is drawing. Measured in Edge at
    4.3's code review with isPointInStroke: at +50% the gap sat at 9 o'clock; at
-   -50% it sits at 3 o'clock and the ring empties 12 -> 3 -> 6 -> 9. */
+   -50% it sits at 3 o'clock and the ring empties 12 -> 3 -> 6 -> 9.
+
+   The sign lives in the PROPERTY and not in a calc() here, and that is load
+   bearing rather than stylistic. `to { calc(var(--x) * -1) }` against a plain
+   `from: 0` is not interpolable, and the browser silently degrades the whole
+   animation to DISCRETE: measured in Edge on a 30s question, the ring held
+   completely full for 15s and then vanished in one step at the halfway mark.
+   Both ends must be plain numbers. (Caught by the browser pass, code review
+   4.3 - the unit tests cannot see this, because jsdom runs no animation.) */
 @keyframes stage-timer-deplete {
   from { stroke-dashoffset: 0; }
-  to   { stroke-dashoffset: calc(var(--stage-timer-circumference) * -1); }
+  to   { stroke-dashoffset: var(--stage-timer-sweep-end); }
 }

@@ -19,9 +19,13 @@ function sweepStyle(totalSeconds: number, remainingMs: number): CSSProperties {
   return {
     animationDuration: `${totalSeconds}s`,
     animationDelay: `${-elapsed}s`,
-    // consumed by @keyframes stage-timer-deplete, so the dasharray and
-    // the final offset can never disagree
-    '--stage-timer-circumference': String(ringCircumference),
+    // Consumed by @keyframes stage-timer-deplete, so the dasharray and the
+    // final offset can never disagree. NEGATIVE: the sign is what makes the
+    // ring empty clockwise, and it has to live here rather than in a calc()
+    // inside the keyframes — `calc(var(--x) * -1)` against `from: 0` is not
+    // interpolable and Edge degrades the sweep to a single discrete jump at
+    // the halfway mark (measured, code review 4.3).
+    '--stage-timer-sweep-end': String(-ringCircumference),
   } as CSSProperties
 }
 
