@@ -4,6 +4,7 @@ import { useParams } from 'react-router'
 import { strings } from '@/lib/strings.he'
 import { useGameSocket } from '@/lib/use-game-socket'
 import type { GameState, LobbySnapshot } from '@/lib/types'
+import { LobbyStage } from './lobby-stage'
 import { StagePlaceholder } from './stage-placeholder'
 
 /** What every stage component receives. A stage gets the whole snapshot
@@ -22,7 +23,7 @@ export interface StageProps {
 // to the union breaks the build here rather than blanking a projector.
 const stageByState: Record<GameState, ComponentType<StageProps>> = {
   draft: StagePlaceholder,
-  lobby: StagePlaceholder, // story 4.2 — lobby stage
+  lobby: LobbyStage, // story 4.2 — lobby stage
   question_open: StagePlaceholder, // story 4.3 — question stage
   question_closed: StagePlaceholder, // story 4.3 — question stage
   revealed: StagePlaceholder, // story 4.4 — reveal stage
@@ -153,11 +154,16 @@ export function DisplayPage() {
         // appear while the socket is up).
         <p className={stageMessageClass}>{strings.display.connecting}</p>
       ) : (
-        // key={state} remounts on every transition so the ≤300ms cross-fade
+        // key remounts on every transition so the ≤300ms cross-fade
         // replays; under reduced motion the CSS makes it instant, so there
         // is no JS branch here.
+        // The gameId is part of the key because 4.2 is the first stage with
+        // local state (its high-water count, its announced value) and this
+        // component does NOT remount when the URL's gameId changes — the
+        // same trap the `retained` tagging above fixes. Without it,
+        // /display/A -> /display/B carries game A's counter into game B.
         <div
-          key={rendered.state}
+          key={`${rendered.gameId}:${rendered.state}`}
           className="stage-fade flex w-full flex-1 flex-col items-center justify-center"
         >
           <Stage snapshot={rendered} reducedMotion={reducedMotion} />

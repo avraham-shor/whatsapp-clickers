@@ -235,5 +235,26 @@ export const strings = {
       leaderboard: 'טבלת התוצאות',
       finished: 'המשחק הסתיים',
     },
+    // Lobby stage (story 4.2). The instruction is split into two fragments
+    // rather than one interpolated sentence because the two LTR runs must
+    // be wrapped in <bdi> (DESIGN.md Typography: bidi isolation is
+    // mandatory on web surfaces) and a plain string cannot carry markup.
+    // The stage composes them as:
+    //   {instructionPrefix} <bdi>JOIN {code}</bdi> {instructionTo} <bdi>{number}</bdi>
+    // reproducing EXPERIENCE.md Flow 1 step 3 and mockups/key-stage-lobby.html.
+    lobby: {
+      instructionPrefix: 'שלחו',
+      instructionTo: 'למספר',
+      // [ASSUMPTION]: mockups/key-stage-lobby.html renders "57 הצטרפו".
+      // Plural at every count, including 1: Hebrew singular past tense is
+      // gendered ("הצטרף") and A2 forbids gendered address, so the mildly
+      // imperfect "1 הצטרפו" is the gender-safe choice. Same class as
+      // deferred-work.md's 1.5 "Hebrew dual-form count" entry.
+      joinedLabel: 'הצטרפו',
+      // Polite, throttled announcement (EXPERIENCE.md Accessibility
+      // Floor). A full sentence, unlike the visual pill, because a screen
+      // reader gets no layout to carry the meaning.
+      countAnnouncement: (count: number) => `${count} הצטרפו למשחק`,
+    },
   },
 } as const

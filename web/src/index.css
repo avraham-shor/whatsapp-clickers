@@ -210,6 +210,22 @@
   --stage-ui: 2.5vw;
   --stage-body: 2.0834vw;
   --stage-margin: 2.5vw;
+  /* DESIGN.md components.stage-lobby: the JOIN Code and the phone
+     number sit ABOVE the display step - the spec says "120px+" while
+     A19's 96px Display figure is the timer numeral. Transcribing the
+     number is the product's hardest visual task (DESIGN.md
+     Typography), so it gets maximum scale. 9vw = 172.8px at 1920,
+     matching mockups/key-stage-lobby.html's 9cqw.
+
+     The 16vh term is a fit guard, not a second opinion on the size: at 16:9
+     the two are EQUAL (16vh = 172.8px at 1080), so every measured value on
+     both verified resolutions is unchanged and min() only ever engages on a
+     viewport SHORTER than 16:9. It is here because .stage-root is min-h-svh
+     - a minimum - so an overlong stack makes the root grow instead of
+     clipping, overflow-hidden never engages, and the counter pill drops
+     below the fold of a surface nobody scrolls. Silent, and reachable by a
+     merely un-maximized window. (Code review, 4.2.) */
+  --stage-lobby-code: min(9vw, 16vh);
 }
 
 /* The stage cross-fade (EXPERIENCE.md: <=300ms, instant when reduced).
