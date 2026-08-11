@@ -89,6 +89,8 @@ jobs:
         run: npm run lint
       - name: typecheck
         run: npx tsc -b --noEmit
+      - name: vitest
+        run: npm test
       - name: build
         run: npm run build
       - name: filter-safety on built bundle (UX-DR4)
