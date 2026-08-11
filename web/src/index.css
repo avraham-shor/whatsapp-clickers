@@ -226,6 +226,16 @@
      below the fold of a surface nobody scrolls. Silent, and reachable by a
      merely un-maximized window. (Code review, 4.2.) */
   --stage-lobby-code: min(9vw, 16vh);
+  /* DESIGN.md components.timer-hero: 220px ring. 11.4583vw = 220px at
+     1920; the 20.3704vh term is the same fit guard 4.2's review added to
+     --stage-lobby-code - at 16:9 the two are EQUAL (20.3704vh = 220px at
+     1080), so every measured value on both verified resolutions is
+     unchanged and min() only engages on a viewport shorter than 16:9,
+     where the 35% band would otherwise not contain the ring. */
+  --stage-timer-ring: min(11.4583vw, 20.3704vh);
+  /* DESIGN.md components.stage-option minHeight: 96px. 5vw = 96px at
+     1920, 8.8889vh = 96px at 1080 - equal at 16:9, same guard shape. */
+  --stage-option-min: min(5vw, 8.8889vh);
 }
 
 /* The stage cross-fade (EXPERIENCE.md: <=300ms, instant when reduced).
@@ -249,9 +259,52 @@
     .stage-fade { animation: none; }
   }
   .stage-root[data-reduced-motion='true'] .stage-fade { animation: none; }
+
+  /* The timer ring's depletion (EXPERIENCE.md Component Patterns: "Ring
+     depletes via CSS animation"). Duration and a NEGATIVE delay are set
+     inline from the server's absolute deadline, so a display that
+     connects mid-question - or reconnects - resumes at the right point
+     instead of restarting the sweep. Layered for the same reason
+     .stage-fade is (code review, 2026-08-09): an unlayered rule would
+     outrank any animation-* utility a later stage puts on the element.
+     There is deliberately NO prefers-reduced-motion rule here: this
+     stage kills the sweep from the reducedMotion PROP (see story 4.3's
+     derived requirement 9), because the CSS channel is invisible to a
+     unit test and would leave 4.1's StageProps entry open. */
+  .stage-timer-sweep {
+    animation-name: stage-timer-deplete;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+    animation-duration: 0s; /* replaced inline, per question */
+  }
 }
 
 @keyframes stage-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
+}
+
+/* --stage-timer-sweep-end is set inline on the <circle> from the same
+   constant its strokeDasharray uses, so the dasharray and the final offset
+   can never disagree.
+
+   It carries the NEGATIVE circumference, and that sign is the whole direction
+   of the sweep. An SVG <circle>'s path starts at 3 o'clock and advances
+   clockwise, and the element's rotate(-90) puts that start at 12 o'clock; a
+   POSITIVE dashoffset then retracts the arc's far end, so the ring empties
+   12 -> 9 -> 6 -> 3, i.e. COUNTERCLOCKWISE - the opposite of the clockwise
+   countdown convention timer-ring.tsx says it is drawing. Measured in Edge at
+   4.3's code review with isPointInStroke: at +50% the gap sat at 9 o'clock; at
+   -50% it sits at 3 o'clock and the ring empties 12 -> 3 -> 6 -> 9.
+
+   The sign lives in the PROPERTY and not in a calc() here, and that is load
+   bearing rather than stylistic. `to { calc(var(--x) * -1) }` against a plain
+   `from: 0` is not interpolable, and the browser silently degrades the whole
+   animation to DISCRETE: measured in Edge on a 30s question, the ring held
+   completely full for 15s and then vanished in one step at the halfway mark.
+   Both ends must be plain numbers. (Caught by the browser pass, code review
+   4.3 - the unit tests cannot see this, because jsdom runs no animation.) */
+@keyframes stage-timer-deplete {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: var(--stage-timer-sweep-end); }
 }

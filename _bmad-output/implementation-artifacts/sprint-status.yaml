@@ -88,7 +88,7 @@ development_status:
   epic-4: in-progress
   4-1-audience-display-shell-the-screen-that-follows-the-game: done
   4-2-lobby-stage-the-room-fills-the-screen: done
-  4-3-question-stage-with-the-authoritative-timer: backlog
+  4-3-question-stage-with-the-authoritative-timer: done
   4-4-reveal-stage-the-answer-marked: backlog
   4-5-leaderboard-stage-the-room-reshuffles: backlog
   4-6-winner-takeover: backlog

@@ -5,17 +5,12 @@ import { strings } from '@/lib/strings.he'
 import { useGameSocket } from '@/lib/use-game-socket'
 import type { GameState, LobbySnapshot } from '@/lib/types'
 import { LobbyStage } from './lobby-stage'
+import { QuestionStage } from './question-stage'
 import { StagePlaceholder } from './stage-placeholder'
-
-/** What every stage component receives. A stage gets the whole snapshot
- * (not narrowed props) because the snapshot is the store — narrowing would
- * mean editing this shell every time a stage needs one more field.
- * reducedMotion is already the OR of the viewer's OS setting and the
- * Organizer's room-level setting: no stage should ever call matchMedia. */
-export interface StageProps {
-  snapshot: LobbySnapshot
-  reducedMotion: boolean
-}
+// The contract lives in its own module (story 4.3) and is deliberately NOT
+// re-exported from here: a `export type { StageProps } from './stage-props'`
+// would preserve the very import path whose value form recreates the cycle.
+import type { StageProps } from './stage-props'
 
 // One component per game state (UX-DR16). Stories 4.2–4.6 each replace
 // exactly one entry; `draft` keeps the placeholder. A Record<GameState, …>
@@ -24,8 +19,8 @@ export interface StageProps {
 const stageByState: Record<GameState, ComponentType<StageProps>> = {
   draft: StagePlaceholder,
   lobby: LobbyStage, // story 4.2 — lobby stage
-  question_open: StagePlaceholder, // story 4.3 — question stage
-  question_closed: StagePlaceholder, // story 4.3 — question stage
+  question_open: QuestionStage, // story 4.3 — question stage
+  question_closed: QuestionStage, // story 4.3 — question stage (timer at 0)
   revealed: StagePlaceholder, // story 4.4 — reveal stage
   leaderboard: StagePlaceholder, // story 4.5 — leaderboard stage
   finished: StagePlaceholder, // story 4.6 — winner takeover
@@ -105,6 +100,47 @@ export function DisplayPage() {
   }
   const rendered = snapshot ?? (retained?.gameId === gameId ? retained.snapshot : null)
 
+  // The live answered count must never go backwards in front of a room, and
+  // the stage cannot hold that floor by itself: the key further down remounts
+  // it on every state transition, so a hold kept inside the stage is discarded
+  // at exactly the question_open -> question_closed moment where the closing
+  // snapshot can carry a count LOWER than one already delivered. Measured at
+  // 4.3's code review, not theorised: 8 -> 7 across that transition.
+  //
+  // The mechanism is deferred-work.md's 2.4 entry — `seq` is stamped at
+  // Broadcast()-call time, so concurrent writers can deliver a lower count
+  // under a higher seq and use-game-socket's `seq < lastSeq` guard accepts it.
+  // Sound ONLY because within one Question the count cannot legitimately fall:
+  // `answers` is append-once under UNIQUE (question_id, participant_id) and
+  // nothing deletes a row. Keyed on the question id so question 2 never
+  // inherits question 1's floor, and deliberately applied to this ONE field —
+  // 4.5's leaderboard positions genuinely move both ways and freezing a
+  // maximum there would be a real bug.
+  //
+  // The stage keeps its own within-mount hold as the near guard; this is the
+  // half that survives the remount. Same render-phase state pattern as above.
+  const [answeredFloor, setAnsweredFloor] = useState<{
+    questionId: string
+    count: number
+  } | null>(null)
+  const currentQuestion = rendered?.currentQuestion ?? null
+  if (
+    currentQuestion !== null &&
+    (answeredFloor === null ||
+      answeredFloor.questionId !== currentQuestion.id ||
+      currentQuestion.answeredCount > answeredFloor.count)
+  ) {
+    setAnsweredFloor({ questionId: currentQuestion.id, count: currentQuestion.answeredCount })
+  }
+  const stageSnapshot: LobbySnapshot | null =
+    rendered !== null &&
+    currentQuestion !== null &&
+    answeredFloor !== null &&
+    answeredFloor.questionId === currentQuestion.id &&
+    answeredFloor.count > currentQuestion.answeredCount
+      ? { ...rendered, currentQuestion: { ...currentQuestion, answeredCount: answeredFloor.count } }
+      : rendered
+
   // Optional-chained even though the field is non-optional in LobbySnapshot:
   // store/migrate.go documents redeploys briefly running two instances, so a
   // new bundle whose socket lands on a still-draining old instance receives a
@@ -148,7 +184,7 @@ export function DisplayPage() {
       {/* A dead end, not a transient one: no overlay, no retry, no stage. */}
       {notFound ? (
         <p className={stageMessageClass}>{strings.display.notFound}</p>
-      ) : !rendered || !Stage ? (
+      ) : !rendered || !Stage || !stageSnapshot ? (
         // First connect, nothing ever rendered: the only moment the
         // "connecting" copy is allowed on screen (UX-DR12 — it must never
         // appear while the socket is up).
@@ -166,7 +202,7 @@ export function DisplayPage() {
           key={`${rendered.gameId}:${rendered.state}`}
           className="stage-fade flex w-full flex-1 flex-col items-center justify-center"
         >
-          <Stage snapshot={rendered} reducedMotion={reducedMotion} />
+          <Stage snapshot={stageSnapshot} reducedMotion={reducedMotion} />
         </div>
       )}
 

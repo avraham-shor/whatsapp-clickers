@@ -1,10 +1,7 @@
 import type { ComponentType } from 'react'
 
 import { strings } from '@/lib/strings.he'
-// import type, not a value import: display-page.tsx imports this component,
-// so a value import would be a runtime cycle. A type-only import is erased
-// at compile time and is not.
-import type { StageProps } from './display-page'
+import type { StageProps } from './stage-props'
 
 // Every state maps here until its own story (4.2–4.6) replaces that one
 // entry in display-page's stageByState map; `draft` keeps it permanently
