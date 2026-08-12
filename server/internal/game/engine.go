@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -70,6 +71,8 @@ type Store interface {
 	GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error)
 	RecordAnswer(ctx context.Context, arg store.RecordAnswerParams) (gen.Answer, error)
 	CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error)
+	ListAnswerCountsByResponse(ctx context.Context, questionID string) ([]gen.ListAnswerCountsByResponseRow, error)
+	CountCorrectAnswersByQuestion(ctx context.Context, questionID string) (int32, error)
 	CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error)
 	UpdateAnswerGrade(ctx context.Context, answerID string, isCorrect bool, stage string) error
 	UpdateGameDisplaySettings(ctx context.Context, gameID, organizerID string, reducedMotion bool) (gen.Game, error)
@@ -558,6 +561,18 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 					return Snapshot{}, err
 				}
 				current.AnsweredCount = int(count)
+				// The answer becomes wire-visible at exactly one state (story
+				// 4.4's derived requirement 5). Two extra round trips, taken
+				// only here: every other state, including the question_open
+				// frame that fires on every inbound answer, skips this
+				// entirely.
+				if g.State == StateRevealed {
+					rev, err := e.buildQuestionReveal(ctx, q)
+					if err != nil {
+						return Snapshot{}, err
+					}
+					current.Reveal = rev
+				}
 				break
 			}
 		}
@@ -581,6 +596,64 @@ func (e *Engine) buildSnapshot(ctx context.Context, g gen.Game) (Snapshot, error
 		Leaderboard:      leaderboard,
 		DisplaySettings:  DisplaySettings{ReducedMotion: g.ReducedMotion},
 	}, nil
+}
+
+// buildQuestionReveal reads what the Audience Display needs to mark q's
+// answer (story 4.4, FR-10). Called from buildSnapshot ONLY while the game
+// is revealed — the state is the gate that keeps the correct answer off the
+// wire at every other state, and it is the only gate there is.
+//
+// Errors propagate rather than degrading to a partial payload: a reveal
+// stage that renders its waiting copy for a beat is the documented degraded
+// path (snapshotAfterCommit already owns that degradation), whereas a
+// half-filled distribution is a wrong answer in front of a room.
+func (e *Engine) buildQuestionReveal(ctx context.Context, q gen.Question) (*QuestionReveal, error) {
+	correct, err := e.store.CountCorrectAnswersByQuestion(ctx, q.ID)
+	if err != nil {
+		return nil, err
+	}
+	rev := &QuestionReveal{CorrectCount: int(correct)}
+
+	// The bare literal matches game/answers.go's own switch on question
+	// type; this package has no question-type constant and inventing one
+	// here would be a rename touching files this story must not.
+	if q.Type == "mcq" {
+		rev.CorrectOption = int(q.CorrectOption)
+		// Zero-filled and non-nil, so the wire carries [0,0,0,0] rather
+		// than null for a question nobody answered — the same "never null
+		// on the wire" discipline as Participants above.
+		counts := make([]int, len(q.Options))
+		rows, err := e.store.ListAnswerCountsByResponse(ctx, q.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			// MCQ responses are stored normalized to "1".."4"
+			// (migration 00010's comment on answers.response), so this
+			// parse is exact rather than a heuristic. A row outside that
+			// range still counts toward answeredCount but lands on NO
+			// bar: unreachable today, and silently attributing it to the
+			// wrong option would be worse than dropping it.
+			n, err := strconv.Atoi(r.Response)
+			if err != nil || n < 1 || n > len(counts) {
+				continue
+			}
+			counts[n-1] += int(r.AnswerCount)
+		}
+		rev.OptionCounts = counts
+		return rev, nil
+	}
+
+	// free_text: no OptionCounts at all — the field stays nil and omitempty
+	// drops it, matching how Options itself is already absent here.
+	// questions_type_shape enforces cardinality(accepted_answers) >= 1, so
+	// the guard is belt-and-braces against a row that predates the
+	// constraint; an empty string then renders an empty card rather than
+	// panicking a live game.
+	if len(q.AcceptedAnswers) > 0 {
+		rev.AcceptedAnswer = q.AcceptedAnswers[0]
+	}
+	return rev, nil
 }
 
 // emptySnapshot builds a snapshot with a non-nil, empty participant list and

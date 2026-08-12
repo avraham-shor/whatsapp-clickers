@@ -54,9 +54,31 @@ export interface GameList {
   items: GameListItem[]
 }
 
+/** Mirrors the Go game.QuestionReveal — what the Audience Display needs to
+ * mark the answer, present ONLY while the game is `revealed` (story 4.4).
+ * That state IS the gate: before the Organizer reveals, `reveal` is null and
+ * the correct answer is nowhere on the wire.
+ *
+ * Not role-conditional: one snapshot serves both role=host and role=display
+ * over the same WS envelope, and both are authenticated with the Organizer's
+ * own session. Participants never receive a snapshot — they are on WhatsApp. */
+export interface QuestionReveal {
+  /** Present on mcq only: 1-based index into options. */
+  correctOption?: number
+  /** Present on free_text only: the primary form shown at Reveal (A15). */
+  acceptedAnswer?: string
+  /** Present on mcq only: answers per option, index-aligned with options. */
+  optionCounts?: number[]
+  /** Never omitted — 0 correct is a real number, and a dropped key would
+   * render the free-text counts line as "undefined צדקו". */
+  correctCount: number
+}
+
 /** Mirrors the Go game.CurrentQuestion. Deliberately omits the correct
- * answer (correctOption/acceptedAnswers) — Snapshot is the one payload both
- * role=host and role=display receive over the same WS envelope. */
+ * answer (correctOption/acceptedAnswers) at every state EXCEPT revealed,
+ * where the nested `reveal` below carries them — Snapshot is the one payload
+ * both role=host and role=display receive over the same WS envelope, so the
+ * state is the only gate there is, and it is the gate. */
 export interface CurrentQuestion {
   id: string
   position: number
@@ -67,6 +89,24 @@ export interface CurrentQuestion {
   /** RFC 3339 UTC. */
   answerCutoffAt: string
   answeredCount: number
+  /** Nullable AND optional, and the optionality is a deliberate, recorded
+   * deviation from story 4.4's Task 4 (which asked for non-optional, to
+   * mirror the Go pointer that carries no omitempty and therefore always
+   * puts the key on the wire).
+   *
+   * Non-optional is a compile error in `question-stage.test.tsx` and
+   * `display-page.test.tsx`, whose fixture builders predate this field — and
+   * those two files are two of the four the same story forbids editing,
+   * because a byte-identical diff on them is the whole proof that 4.4's two
+   * component extractions preserved behaviour. The two requirements cannot
+   * both hold literally.
+   *
+   * The optional form loses nothing the non-optional form was for: reading
+   * `reveal.correctOption` without a check is still a type error, so derived
+   * requirement 9's guard is still forced by the compiler. What it loses is
+   * documentation fidelity to the wire — recovered by this comment, and by
+   * the E2E, which asserts on the raw JSON's explicit `"reveal": null`. */
+  reveal?: QuestionReveal | null
 }
 
 /** Mirrors the Go game.LeaderboardEntry — one ranked row of the live

@@ -2,7 +2,9 @@ package game
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +102,18 @@ type stubStore struct {
 
 	countAnswersByQuestionResult int64
 	countAnswersByQuestionErr    error
+
+	// The two reveal-only reads (story 4.4). Zero values mean "no rows /
+	// 0 correct", so every pre-4.4 test compiles and passes unchanged;
+	// the call counters are what prove the reads never run before the
+	// reveal.
+	listAnswerCountsByResponseResult []gen.ListAnswerCountsByResponseRow
+	listAnswerCountsByResponseErr    error
+	listAnswerCountsByResponseCalls  int
+
+	countCorrectAnswersByQuestionResult int32
+	countCorrectAnswersByQuestionErr    error
+	countCorrectAnswersByQuestionCalls  int
 
 	countUngradedAnswersForCurrentQuestionResult int64
 	countUngradedAnswersForCurrentQuestionErr    error
@@ -233,6 +247,16 @@ func (s *stubStore) RecordAnswer(ctx context.Context, arg store.RecordAnswerPara
 
 func (s *stubStore) CountAnswersByQuestion(ctx context.Context, questionID string) (int64, error) {
 	return s.countAnswersByQuestionResult, s.countAnswersByQuestionErr
+}
+
+func (s *stubStore) ListAnswerCountsByResponse(ctx context.Context, questionID string) ([]gen.ListAnswerCountsByResponseRow, error) {
+	s.listAnswerCountsByResponseCalls++
+	return s.listAnswerCountsByResponseResult, s.listAnswerCountsByResponseErr
+}
+
+func (s *stubStore) CountCorrectAnswersByQuestion(ctx context.Context, questionID string) (int32, error) {
+	s.countCorrectAnswersByQuestionCalls++
+	return s.countCorrectAnswersByQuestionResult, s.countCorrectAnswersByQuestionErr
 }
 
 func (s *stubStore) CountUngradedAnswersForCurrentQuestion(ctx context.Context, gameID string) (int64, error) {
@@ -558,6 +582,359 @@ func TestSnapshotAnsweredCountErrorPropagates(t *testing.T) {
 	if err == nil {
 		t.Fatal("Snapshot() err = nil, want a propagated error")
 	}
+}
+
+// --- The reveal payload (story 4.4) ---
+
+// revealedSnapshotStub is a revealed game whose current question is the
+// single mcq at position 1, with correct_option 2 — the read-side stub for
+// the reveal payload tests below (revealedStub above is the NextQuestion
+// transition's stub and carries a second question).
+func revealedSnapshotStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateRevealed, JoinCode: "AB2CD3", CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff}
+	questions := oneQuestion()
+	questions[0].CorrectOption = 2
+	return &stubStore{game: g, listQuestionsByGameResult: questions}
+}
+
+// TestSnapshotBeforeRevealCarriesNoRevealAndReadsNothing is the security
+// property the whole nested-payload design rests on (story 4.4, derived
+// requirement 5): the correct answer is nowhere on the wire until the state
+// is revealed. Asserting only the nil would miss a read that still runs —
+// costing a round trip on the hot path and putting the answer in a log line
+// — so the call counters are asserted too.
+func TestSnapshotBeforeRevealCarriesNoRevealAndReadsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		st   *stubStore
+	}{
+		{"question_open", questionOpenStub()},
+		{"question_closed", questionClosedStub()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.st.listAnswerCountsByResponseResult = []gen.ListAnswerCountsByResponseRow{{Response: "2", AnswerCount: 7}}
+			tc.st.countCorrectAnswersByQuestionResult = 7
+			e := NewEngine(tc.st, "+972 50-000-0000", nil)
+
+			snap, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+			if err != nil {
+				t.Fatalf("Snapshot() err = %v", err)
+			}
+			if snap.CurrentQuestion == nil {
+				t.Fatal("CurrentQuestion = nil, want the question at position 1")
+			}
+			if snap.CurrentQuestion.Reveal != nil {
+				t.Errorf("Reveal = %+v, want nil before the reveal", snap.CurrentQuestion.Reveal)
+			}
+			if tc.st.listAnswerCountsByResponseCalls != 0 || tc.st.countCorrectAnswersByQuestionCalls != 0 {
+				t.Errorf("reveal reads ran before the reveal: distribution=%d correct=%d, want 0/0",
+					tc.st.listAnswerCountsByResponseCalls, tc.st.countCorrectAnswersByQuestionCalls)
+			}
+		})
+	}
+}
+
+func TestSnapshotAtRevealedCarriesMCQDistribution(t *testing.T) {
+	st := revealedSnapshotStub()
+	st.countAnswersByQuestionResult = 10
+	st.listAnswerCountsByResponseResult = []gen.ListAnswerCountsByResponseRow{
+		{Response: "1", AnswerCount: 2},
+		{Response: "2", AnswerCount: 5},
+		{Response: "4", AnswerCount: 3},
+	}
+	st.countCorrectAnswersByQuestionResult = 5
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Snapshot() err = %v", err)
+	}
+	rev := snap.CurrentQuestion.Reveal
+	if rev == nil {
+		t.Fatal("Reveal = nil at revealed, want the payload")
+	}
+	if rev.CorrectOption != 2 {
+		t.Errorf("CorrectOption = %d, want 2", rev.CorrectOption)
+	}
+	if rev.CorrectCount != 5 {
+		t.Errorf("CorrectCount = %d, want 5", rev.CorrectCount)
+	}
+	// Index-aligned with Options, zero-filled for an option nobody chose —
+	// so the wire carries [2 5 0 3] and never a short or nil array.
+	want := []int{2, 5, 0, 3}
+	if len(rev.OptionCounts) != len(want) {
+		t.Fatalf("OptionCounts = %v, want %v", rev.OptionCounts, want)
+	}
+	for i, n := range want {
+		if rev.OptionCounts[i] != n {
+			t.Errorf("OptionCounts[%d] = %d, want %d", i, rev.OptionCounts[i], n)
+		}
+	}
+	if rev.AcceptedAnswer != "" {
+		t.Errorf("AcceptedAnswer = %q on an mcq, want empty", rev.AcceptedAnswer)
+	}
+}
+
+// TestSnapshotAtRevealedDropsOutOfRangeResponses covers the rows the SQL
+// comment says are returned like any other: a response outside
+// 1..len(options) must land on NO bar rather than on the wrong one.
+func TestSnapshotAtRevealedDropsOutOfRangeResponses(t *testing.T) {
+	st := revealedSnapshotStub()
+	st.listAnswerCountsByResponseResult = []gen.ListAnswerCountsByResponseRow{
+		{Response: "0", AnswerCount: 4},
+		{Response: "5", AnswerCount: 6},
+		{Response: "ג", AnswerCount: 9},
+		{Response: "3", AnswerCount: 1},
+	}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Snapshot() err = %v", err)
+	}
+	rev := snap.CurrentQuestion.Reveal
+	if rev == nil {
+		t.Fatal("Reveal = nil at revealed, want the payload")
+	}
+	want := []int{0, 0, 1, 0}
+	if len(rev.OptionCounts) != len(want) {
+		t.Fatalf("OptionCounts = %v, want %v", rev.OptionCounts, want)
+	}
+	for i, n := range want {
+		if rev.OptionCounts[i] != n {
+			t.Errorf("OptionCounts[%d] = %d, want %d (out-of-range responses must land on no bar)", i, rev.OptionCounts[i], n)
+		}
+	}
+}
+
+func TestSnapshotAtRevealedCarriesFreeTextAcceptedAnswer(t *testing.T) {
+	st := revealedSnapshotStub()
+	st.listQuestionsByGameResult = []gen.Question{
+		{ID: "q1", GameID: testGameID, Position: 1, Type: "free_text", Text: "capital?", AcceptedAnswers: []string{"Jerusalem", "Yerushalayim"}, TimeLimitSeconds: 20},
+	}
+	st.countCorrectAnswersByQuestionResult = 4
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Snapshot() err = %v", err)
+	}
+	rev := snap.CurrentQuestion.Reveal
+	if rev == nil {
+		t.Fatal("Reveal = nil at revealed, want the payload")
+	}
+	if rev.AcceptedAnswer != "Jerusalem" {
+		t.Errorf("AcceptedAnswer = %q, want the FIRST accepted answer", rev.AcceptedAnswer)
+	}
+	if rev.CorrectCount != 4 {
+		t.Errorf("CorrectCount = %d, want 4", rev.CorrectCount)
+	}
+	// Nil, so omitempty drops the key entirely — matching how Options
+	// itself is already absent on a free-text question.
+	if rev.OptionCounts != nil {
+		t.Errorf("OptionCounts = %v on free_text, want nil", rev.OptionCounts)
+	}
+	if rev.CorrectOption != 0 {
+		t.Errorf("CorrectOption = %d on free_text, want the omitempty-dropped 0", rev.CorrectOption)
+	}
+	// The distribution read is mcq-only: a free-text question has no bars.
+	if st.listAnswerCountsByResponseCalls != 0 {
+		t.Errorf("distribution read ran %d times on free_text, want 0", st.listAnswerCountsByResponseCalls)
+	}
+}
+
+// TestSnapshotRevealReadErrorPropagates mirrors
+// TestSnapshotAnsweredCountErrorPropagates: a failed reveal read fails the
+// whole build rather than degrading here. The callers that must not fail
+// already route through snapshotAfterCommit, which degrades to
+// emptySnapshot — the display then renders its waiting copy for a beat,
+// which is the documented degraded path (story 4.4, derived requirement 9).
+func TestSnapshotRevealReadErrorPropagates(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		apply func(*stubStore)
+	}{
+		{"distribution", func(s *stubStore) { s.listAnswerCountsByResponseErr = errors.New("boom") }},
+		{"correct count", func(s *stubStore) { s.countCorrectAnswersByQuestionErr = errors.New("boom") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := revealedSnapshotStub()
+			tc.apply(st)
+			e := NewEngine(st, "+972 50-000-0000", nil)
+
+			if _, err := e.Snapshot(context.Background(), testGameID, testOrganizerID); err == nil {
+				t.Fatal("Snapshot() err = nil, want a propagated error")
+			}
+		})
+	}
+}
+
+// TestEmptySnapshotCarriesNoReveal states the property rather than adding a
+// field to guarantee it: emptySnapshot's CurrentQuestion is nil, so a
+// degraded post-commit snapshot at revealed carries no reveal by
+// construction. This is the frame derived requirement 9's first guard
+// handles.
+func TestEmptySnapshotCarriesNoReveal(t *testing.T) {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateRevealed, JoinCode: "AB2CD3"}
+	snap := emptySnapshot("+972 50-000-0000", g)
+	if snap.State != StateRevealed {
+		t.Errorf("State = %q, want revealed", snap.State)
+	}
+	if snap.CurrentQuestion != nil {
+		t.Errorf("CurrentQuestion = %+v, want nil", snap.CurrentQuestion)
+	}
+}
+
+// TestSnapshotAfterRevealCarriesNoReveal covers the two states on the far side
+// of the reveal. Both keep current_question_position > 0, so buildSnapshot
+// still constructs a CurrentQuestion — the reveal payload simply vanishes from
+// the wire the moment the game moves on. That is intended (the room is looking
+// at the leaderboard or the winner, not at the marked answer), but nothing
+// asserted it, so a future change to the state gate could take these with it
+// unnoticed. The call counters are asserted for the same reason they are
+// before the reveal: a read that still runs costs a round trip and puts the
+// answer in a log line. (Code review, 2026-08-12.)
+func TestSnapshotAfterRevealCarriesNoReveal(t *testing.T) {
+	for _, state := range []string{StateLeaderboard, StateFinished} {
+		t.Run(state, func(t *testing.T) {
+			st := revealedSnapshotStub()
+			st.game.State = state
+			st.listAnswerCountsByResponseResult = []gen.ListAnswerCountsByResponseRow{{Response: "2", AnswerCount: 7}}
+			st.countCorrectAnswersByQuestionResult = 7
+			e := NewEngine(st, "+972 50-000-0000", nil)
+
+			snap, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+			if err != nil {
+				t.Fatalf("Snapshot() err = %v", err)
+			}
+			if snap.CurrentQuestion == nil {
+				t.Fatal("CurrentQuestion = nil, want the question at position 1")
+			}
+			if snap.CurrentQuestion.Reveal != nil {
+				t.Errorf("Reveal = %+v at %s, want nil — the gate is revealed and nothing else",
+					snap.CurrentQuestion.Reveal, state)
+			}
+			if st.listAnswerCountsByResponseCalls != 0 || st.countCorrectAnswersByQuestionCalls != 0 {
+				t.Errorf("reveal reads ran at %s: distribution=%d correct=%d, want 0/0",
+					state, st.listAnswerCountsByResponseCalls, st.countCorrectAnswersByQuestionCalls)
+			}
+		})
+	}
+}
+
+// TestSnapshotFreeTextWithNoAcceptedAnswersDoesNotPanic exercises
+// buildQuestionReveal's len(q.AcceptedAnswers) > 0 guard, which nothing else
+// reaches. questions_type_shape enforces cardinality >= 1, so this is a row
+// that predates the constraint — the guard exists precisely so such a row
+// renders an empty card instead of panicking a live game, and an unasserted
+// guard is one a future simplification deletes. (Code review, 2026-08-12.)
+func TestSnapshotFreeTextWithNoAcceptedAnswersDoesNotPanic(t *testing.T) {
+	st := revealedSnapshotStub()
+	st.listQuestionsByGameResult = []gen.Question{
+		{ID: "q1", GameID: testGameID, Position: 1, Type: "free_text", Text: "capital?", AcceptedAnswers: nil, TimeLimitSeconds: 20},
+	}
+	st.countCorrectAnswersByQuestionResult = 2
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("Snapshot() err = %v", err)
+	}
+	rev := snap.CurrentQuestion.Reveal
+	if rev == nil {
+		t.Fatal("Reveal = nil at revealed, want the payload")
+	}
+	if rev.AcceptedAnswer != "" {
+		t.Errorf("AcceptedAnswer = %q, want empty", rev.AcceptedAnswer)
+	}
+	if rev.CorrectCount != 2 {
+		t.Errorf("CorrectCount = %d, want 2 — the count is independent of the answer text", rev.CorrectCount)
+	}
+}
+
+// TestRevealWireContract asserts on the MARSHALLED JSON rather than on the Go
+// struct, because the wire is where this story's design actually lives: three
+// omitempty decisions plus one deliberate absence of omitempty. Every other
+// reveal test reads the struct, where all four are invisible — so before this
+// test, dropping `omitempty` from OptionCounts, or adding it to CorrectCount,
+// left the entire Go suite green while changing what the display receives.
+// The now-deleted E2E was the only thing that ever checked it.
+// (Code review, 2026-08-12.)
+func TestRevealWireContract(t *testing.T) {
+	marshal := func(t *testing.T, st *stubStore) string {
+		t.Helper()
+		e := NewEngine(st, "+972 50-000-0000", nil)
+		snap, err := e.Snapshot(context.Background(), testGameID, testOrganizerID)
+		if err != nil {
+			t.Fatalf("Snapshot() err = %v", err)
+		}
+		b, err := json.Marshal(snap.CurrentQuestion)
+		if err != nil {
+			t.Fatalf("json.Marshal() err = %v", err)
+		}
+		return string(b)
+	}
+
+	t.Run("before the reveal the key is present and null", func(t *testing.T) {
+		got := marshal(t, questionOpenStub())
+		// An absent key and an explicit null both read as null in TS, but the
+		// explicit null is what makes a captured frame self-documenting — and
+		// it is the property the pointer-without-omitempty exists to give.
+		if !strings.Contains(got, `"reveal":null`) {
+			t.Errorf("frame = %s, want an explicit \"reveal\":null", got)
+		}
+		for _, leak := range []string{"correctOption", "acceptedAnswer", "optionCounts", "correctCount"} {
+			if strings.Contains(got, leak) {
+				t.Errorf("frame leaks %q before the reveal: %s", leak, got)
+			}
+		}
+	})
+
+	t.Run("mcq carries the distribution and a zero correctCount", func(t *testing.T) {
+		st := revealedSnapshotStub()
+		st.listAnswerCountsByResponseResult = []gen.ListAnswerCountsByResponseRow{{Response: "1", AnswerCount: 2}}
+		st.countCorrectAnswersByQuestionResult = 0
+		got := marshal(t, st)
+
+		if !strings.Contains(got, `"correctOption":2`) {
+			t.Errorf("frame = %s, want correctOption 2", got)
+		}
+		// Zero-filled and non-nil, so a question nobody chose an option on
+		// still carries four bars rather than null.
+		if !strings.Contains(got, `"optionCounts":[2,0,0,0]`) {
+			t.Errorf("frame = %s, want optionCounts [2,0,0,0]", got)
+		}
+		// The one field with NO omitempty, and this is why: 0 correct is a real
+		// and interesting number, and a dropped key renders as undefined.
+		if !strings.Contains(got, `"correctCount":0`) {
+			t.Errorf("frame = %s, want an explicit correctCount 0", got)
+		}
+		if strings.Contains(got, "acceptedAnswer") {
+			t.Errorf("frame = %s, want acceptedAnswer omitted on mcq", got)
+		}
+	})
+
+	t.Run("free_text omits the mcq-only fields entirely", func(t *testing.T) {
+		st := revealedSnapshotStub()
+		st.listQuestionsByGameResult = []gen.Question{
+			{ID: "q1", GameID: testGameID, Position: 1, Type: "free_text", Text: "capital?", AcceptedAnswers: []string{"Jerusalem", "Yerushalayim"}, TimeLimitSeconds: 20},
+		}
+		st.countCorrectAnswersByQuestionResult = 3
+		got := marshal(t, st)
+
+		if !strings.Contains(got, `"acceptedAnswer":"Jerusalem"`) {
+			t.Errorf("frame = %s, want the FIRST accepted answer", got)
+		}
+		if strings.Contains(got, "optionCounts") {
+			t.Errorf("frame = %s, want optionCounts absent on free_text", got)
+		}
+		if strings.Contains(got, "correctOption") {
+			t.Errorf("frame = %s, want correctOption absent on free_text (omitempty drops the sentinel 0)", got)
+		}
+		if !strings.Contains(got, `"correctCount":3`) {
+			t.Errorf("frame = %s, want correctCount 3", got)
+		}
+	})
 }
 
 func TestSnapshotMissingOrForeignGameReturnsErrNotFound(t *testing.T) {

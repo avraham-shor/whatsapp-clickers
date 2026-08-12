@@ -236,6 +236,44 @@
   /* DESIGN.md components.stage-option minHeight: 96px. 5vw = 96px at
      1920, 8.8889vh = 96px at 1080 - equal at 16:9, same guard shape. */
   --stage-option-min: min(5vw, 8.8889vh);
+  /* mockups/key-stage-reveal.html .bar-track height 1.25cqw = 24px at
+     1920. */
+  --stage-bar-track: 1.25vw;
+  /* .bar-label flex-basis 13cqw = 249.6px at 1920. A FIXED basis, not
+     auto: four labels of different widths would give four tracks of
+     different lengths, and bars you cannot compare are not a
+     distribution. Unlike --stage-lobby-code / --stage-option-min there
+     is deliberately NO vh fit guard - this measure competes for
+     horizontal space only, and a vh term here would shrink it on a tall
+     window for no reason. Sized for the widest realistic label,
+     "✓ 80 · 100%" at 48px tabular; story 4.4's browser check 6 measures
+     it, and raising THIS value is the sanctioned fix if it overflows.
+
+     Raised 13vw -> 16vw at story 4.4's code review (2026-08-12), and the
+     number is measured rather than reasoned. 13vw is the mockup's figure,
+     and story 4.4's browser check 6 measured it holding "✓ 80 · 100%" at
+     both resolutions - correctly, but only at TWO digits, which is the
+     ceiling for a room under 100. Re-measured here in real Edge against
+     the built stylesheet, "✓ 100 · 100%" at 48px tabular system-ui needs
+     288px at 1920x1080 and 193px at 1280x720:
+
+       13vw -> 249.6px / 166.4px   both overflow at three digits
+       15vw -> 288px   / 192px     1920 exactly fits; 720p is 1px SHORT
+       16vw -> 307.2px / 204.8px   19px and 12px of real slack
+
+     720p is the binding constraint, not 1080p, because the label scales
+     with the viewport while the text does too - the ratio is what is
+     tight. Four digits (1000+ answers) still overflows and is out of
+     scope. NOTE for whoever reads the older measurement: scrollWidth ==
+     clientWidth means "the content fits", NOT "zero slack" - scrollWidth
+     clamps to the padding box, so it cannot report headroom. That is why
+     13vw's original 256/256 reading looked comfortable and was not.
+
+     The label also gained overflow-hidden in reveal-stage.tsx, so the next
+     label this ramp fails to anticipate is CLIPPED rather than spilling
+     across the bar track - the two changes are the belt and the braces and
+     should be kept together. */
+  --stage-bar-label: 16vw;
 }
 
 /* The stage cross-fade (EXPERIENCE.md: <=300ms, instant when reduced).
@@ -277,6 +315,30 @@
     animation-fill-mode: forwards;
     animation-duration: 0s; /* replaced inline, per question */
   }
+
+  /* The distribution bar's entry (DESIGN.md components.distribution-bar:
+     "~400ms scaleX on entry"). The bar's WIDTH is inline, from the
+     counts; this only animates it in.
+
+     transform-origin is PHYSICAL and that is not an oversight: there is
+     no logical transform-origin, and the Audience Display is dir="rtl"
+     on the document AND again on the shell root, so 100% is always the
+     inline-start edge here. The bar must grow FROM the side it is
+     anchored to; growing from the far edge would slide the whole fill
+     across the track.
+
+     Layered for the same reason .stage-fade and .stage-timer-sweep are
+     (code review, 2026-08-09): an unlayered rule would outrank any
+     animation-* utility a later stage puts on the element.
+
+     Deliberately NO prefers-reduced-motion rule: this stage kills the
+     animation from the reducedMotion PROP (story 4.4's derived
+     requirement 11) so a unit test can see it and so the Organizer's
+     room-level toggle - which is not a media query at all - works. */
+  .stage-bar-grow {
+    transform-origin: 100% 50%;
+    animation: stage-bar-grow 400ms ease-out both;
+  }
 }
 
 @keyframes stage-fade-in {
@@ -307,4 +369,10 @@
 @keyframes stage-timer-deplete {
   from { stroke-dashoffset: 0; }
   to   { stroke-dashoffset: var(--stage-timer-sweep-end); }
+}
+
+/* Only a `from`: the implicit `to` is the element's own transform, so the
+   bar settles at its inline width with nothing to keep in sync. */
+@keyframes stage-bar-grow {
+  from { transform: scaleX(0); }
 }

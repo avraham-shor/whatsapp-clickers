@@ -6,6 +6,7 @@ import { useGameSocket } from '@/lib/use-game-socket'
 import type { GameState, LobbySnapshot } from '@/lib/types'
 import { LobbyStage } from './lobby-stage'
 import { QuestionStage } from './question-stage'
+import { RevealStage } from './reveal-stage'
 import { StagePlaceholder } from './stage-placeholder'
 // The contract lives in its own module (story 4.3) and is deliberately NOT
 // re-exported from here: a `export type { StageProps } from './stage-props'`
@@ -21,7 +22,7 @@ const stageByState: Record<GameState, ComponentType<StageProps>> = {
   lobby: LobbyStage, // story 4.2 — lobby stage
   question_open: QuestionStage, // story 4.3 — question stage
   question_closed: QuestionStage, // story 4.3 — question stage (timer at 0)
-  revealed: StagePlaceholder, // story 4.4 — reveal stage
+  revealed: RevealStage, // story 4.4 — reveal stage
   leaderboard: StagePlaceholder, // story 4.5 — leaderboard stage
   finished: StagePlaceholder, // story 4.6 — winner takeover
 }

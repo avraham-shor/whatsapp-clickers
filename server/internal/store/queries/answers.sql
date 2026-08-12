@@ -96,6 +96,40 @@ RETURNING *;
 -- name: CountAnswersByQuestion :one
 SELECT count(*) FROM answers WHERE question_id = $1;
 
+-- The Reveal's answer distribution (FR-10, story 4.4). MCQ only, and
+-- called only when games.state = 'revealed' — never on the hot path
+-- CountAnswersByQuestion above serves.
+--
+-- GROUP BY response is exact rather than a heuristic: migration
+-- 00010's comment on answers.response fixes MCQ storage as the
+-- normalized "1".."4" (never the raw Hebrew letter), and
+-- game.RecordAnswer is the only writer. Rows whose response falls
+-- outside 1..cardinality(options) are returned like any other and
+-- dropped by the caller — unreachable today, but the count must not
+-- silently land on the wrong bar if it ever is.
+--
+-- idx_answers_question_participant leads with question_id, so this is
+-- an index scan plus a small group, same reasoning as the count above.
+-- name: ListAnswerCountsByResponse :many
+SELECT a.response, count(*)::int AS answer_count
+FROM answers a
+WHERE a.question_id = sqlc.arg(question_id)
+GROUP BY a.response;
+
+-- The Reveal's "Y correct" (FR-10, story 4.4), for both question types.
+-- FILTER rather than a WHERE, so a question nobody got right still
+-- returns one row reading 0 instead of no rows.
+--
+-- is_correct is NOT NULL by the time this runs: Reveal is gated on
+-- CountUngradedAnswersForCurrentQuestion == 0 plus
+-- RevealCurrentQuestion's own NOT EXISTS write-guard, so every answer
+-- for this question is graded before the state can be 'revealed'.
+-- A NULL would count as not-correct, which is also the fail-closed
+-- direction (FR-16).
+-- name: CountCorrectAnswersByQuestion :one
+SELECT (count(*) FILTER (WHERE a.is_correct))::int AS correct_count
+FROM answers a WHERE a.question_id = sqlc.arg(question_id);
+
 -- Powers the engine's pre-check before attempting RevealCurrentQuestion
 -- (game/engine.go Reveal) — read-check for an accurate
 -- ErrGradingIncomplete vs. ErrNotQuestionClosed distinction, mirroring
