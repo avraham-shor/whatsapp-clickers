@@ -274,6 +274,27 @@
      across the bar track - the two changes are the belt and the braces and
      should be kept together. */
   --stage-bar-label: 16vw;
+
+  /* DESIGN.md components.leaderboard-row minHeight: 72px. 3.75vw = 72px
+     at 1920; the 6.6667vh term is the same fit guard --stage-option-min
+     and --stage-timer-ring carry - equal at 16:9, so every measured
+     value at both verified resolutions is unchanged and min() only
+     engages on a viewport shorter than 16:9.
+
+     Used as an EXACT height, not a minimum, and that is load bearing
+     rather than stylistic: the reshuffle below translates a row by a
+     whole number of row heights (story 4.5, derived requirement 11),
+     which is only exact while every row is the same height. It is also
+     why the display name is single-line and truncated.
+
+     Fit: ten rows = 720px inside a 984px content box at 1920x1080
+     (1080 minus two --stage-margin), and 480px inside 656px at
+     1280x720. If the board looks lost on the screen, raising this
+     toward 5vw (96px, the --stage-option-min step) is the sanctioned
+     adjustment - the 1080p headroom allows up to ~98px rows - and it
+     must be re-measured at BOTH resolutions, because 720p is the
+     binding one (see the --stage-bar-label note above). */
+  --stage-leaderboard-row: min(3.75vw, 6.6667vh);
 }
 
 /* The stage cross-fade (EXPERIENCE.md: <=300ms, instant when reduced).
@@ -339,6 +360,50 @@
     transform-origin: 100% 50%;
     animation: stage-bar-grow 400ms ease-out both;
   }
+
+  /* The Leaderboard reshuffle (EXPERIENCE.md Audience Display stages:
+     "The reshuffle animation is explicitly in the reduced-motion list -
+     static reordering when reduced").
+
+     Every row is exactly --stage-leaderboard-row tall, so a row's travel
+     is a whole number of ROW HEIGHTS and translateY(N * 100%) expresses
+     it exactly - no FLIP measurement, no getBoundingClientRect, no ref
+     (react-hooks/refs forbids reading one during render anyway), and
+     nothing a jsdom test cannot see. --stage-row-shift is set inline per
+     row as a unitless row count; POSITIVE means the row starts BELOW its
+     final slot, i.e. it climbed.
+
+     No transform-origin: this is a translate, not a scale. Unlike
+     .stage-bar-grow above, where the origin IS the direction.
+
+     The 300ms DELAY is the point of the stage, not padding: the board
+     arrives holding the order the room last saw, the shell's 300ms
+     cross-fade finishes, and only THEN does it reshuffle. Without it
+     the movement happens underneath the fade and the room never sees
+     where anyone came from - which is the whole spectacle EXPERIENCE.md
+     calls "the reshuffle". 300ms + 600ms = 900ms, inside NFR-1's 1s
+     transition budget.
+
+     fill-mode `backwards`, NOT `both`, and here it is load bearing
+     rather than tidy: `backwards` is what holds the `from` transform
+     through the delay. Without it the rows would paint in their FINAL
+     order for 300ms and then jump backwards to start - the animation
+     playing in reverse, visibly. `both` would additionally pin a
+     transform on every row forever, making each one a containing block
+     for anything positioned inside it later (deferred-work.md carries
+     an open note about .stage-bar-grow's `both` for exactly that - do
+     not "make them consistent" by copying the older one).
+
+     Layered for the same reason .stage-fade / .stage-timer-sweep /
+     .stage-bar-grow are (code review, 2026-08-09).
+
+     Deliberately NO prefers-reduced-motion rule: killed from the
+     reducedMotion PROP (story 4.5's derived requirement 12) so a unit
+     test can see it and so the Organizer's room-level toggle - which is
+     not a media query at all - works. */
+  .stage-row-reshuffle {
+    animation: stage-row-reshuffle 600ms ease-out 300ms backwards;
+  }
 }
 
 @keyframes stage-fade-in {
@@ -375,4 +440,14 @@
    bar settles at its inline width with nothing to keep in sync. */
 @keyframes stage-bar-grow {
   from { transform: scaleX(0); }
+}
+
+/* Only a `from`: the implicit `to` is the row's own position, so it
+   settles in its real slot with nothing to keep in sync - the same shape
+   as stage-bar-grow. The fallback in var() matters: a row with no shift
+   renders the class not at all, but a future caller that forgets the
+   inline property gets a no-op instead of an invalid transform that
+   drops the whole animation. */
+@keyframes stage-row-reshuffle {
+  from { transform: translateY(calc(var(--stage-row-shift, 0) * 100%)); }
 }

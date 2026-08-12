@@ -149,4 +149,137 @@ describe('DisplayPage', () => {
       vi.useRealTimers()
     }
   })
+
+  // --- The Leaderboard stage and its cross-stage memory (story 4.5) ---
+
+  /** Re-renders the shell with a new snapshot, the way a WS frame arrives. */
+  function deliver(rerender: (ui: React.ReactElement) => void, snapshot: LobbySnapshot) {
+    mocks.useGameSocket.mockReturnValue({ snapshot, notFound: false })
+    rerender(
+      <MemoryRouter initialEntries={['/display/game-1']}>
+        <DisplayPage />
+      </MemoryRouter>,
+    )
+  }
+
+  function board(ids: string[]): LobbySnapshot['leaderboard'] {
+    return ids.map((id, index) => ({
+      participantId: id,
+      displayName: `PLAYER-${id}`,
+      score: 500 - index * 100,
+      rank: index + 1,
+    }))
+  }
+
+  function leaderboardSnap(questionId: string, ids: string[]): LobbySnapshot {
+    return {
+      ...snap(question({ id: questionId }), 'leaderboard'),
+      leaderboard: board(ids),
+    }
+  }
+
+  it('mounts the leaderboard stage at `leaderboard` and at no other state', () => {
+    // AC-2's "renders only when entered", from the other direction: the map
+    // entry is what makes the stage reachable at all.
+    vi.useFakeTimers()
+    vi.setSystemTime(baseNow)
+    try {
+      // Asserted on the <ol>, which only LeaderboardStage renders — an `li`
+      // count is really an assertion about whatever ELSE happens to be
+      // mounted, and would move the day another stage renders a list for an
+      // unrelated reason. And every other state is delivered, not three of
+      // them, because the title says "at no other state". (Code review,
+      // 2026-08-12.)
+      const { container, rerender } = renderWith(leaderboardSnap('q-1', ['a', 'b']))
+      expect(container.querySelectorAll('ol')).toHaveLength(1)
+      expect(container.querySelectorAll('li')).toHaveLength(2)
+
+      for (const state of [
+        'draft',
+        'lobby',
+        'question_open',
+        'question_closed',
+        'revealed',
+        'finished',
+      ] as const) {
+        deliver(rerender, { ...snap(question(), state), leaderboard: board(['a', 'b']) })
+        expect(container.querySelectorAll('ol')).toHaveLength(0)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never mounts the leaderboard stage on the UJ-4 skip (AC-2)', () => {
+    // revealed -> question_open directly. The board data is on every frame
+    // (buildSnapshot always reads it), so "no leaderboard frame arrived" is
+    // the only thing that keeps the stage off the screen.
+    vi.useFakeTimers()
+    vi.setSystemTime(baseNow)
+    try {
+      const { container, rerender } = renderWith({
+        ...snap(question(), 'revealed'),
+        leaderboard: board(['a', 'b']),
+      })
+      expect(container.querySelectorAll('ol')).toHaveLength(0)
+
+      deliver(rerender, {
+        ...snap(question({ id: 'q-2', position: 4 }), 'question_open'),
+        leaderboard: board(['a', 'b']),
+      })
+      expect(container.querySelectorAll('ol')).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('delivers the first showing standings as the second showing baseline', () => {
+    // The whole point of the shell owning this: the stage is remounted on
+    // the `${gameId}:${state}` key at every transition, so nothing it
+    // remembered would survive to the next Leaderboard.
+    vi.useFakeTimers()
+    vi.setSystemTime(baseNow)
+    try {
+      const { container, rerender } = renderWith(leaderboardSnap('q-1', ['a', 'b', 'c']))
+      // First showing: no baseline, so no indicator anywhere. Scoped to
+      // `li .sr-only` — the shell's own assertive announcer is sr-only too.
+      expect(container.querySelector('li .sr-only')).toBeNull()
+
+      // A question runs, then the second Leaderboard — c climbed 3 -> 1.
+      deliver(rerender, { ...snap(question({ id: 'q-2', position: 4 }), 'revealed') })
+      deliver(rerender, leaderboardSnap('q-2', ['c', 'a', 'b']))
+
+      const climber = container.querySelectorAll('li')[0]!
+      expect(climber.querySelector('.sr-only')?.textContent).toBe(
+        strings.display.leaderboard.climbedLabel(2),
+      )
+      expect(climber.style.getPropertyValue('--stage-row-shift')).toBe('2')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not re-capture the baseline when a frame repeats within one showing', () => {
+    // The reachable repeat is the Organizer's display-settings toggle.
+    // Re-capturing would overwrite the baseline with the CURRENT standings
+    // and silently erase every arrow one frame after they appeared.
+    vi.useFakeTimers()
+    vi.setSystemTime(baseNow)
+    try {
+      const { container, rerender } = renderWith(leaderboardSnap('q-1', ['a', 'b', 'c']))
+      deliver(rerender, { ...snap(question({ id: 'q-2', position: 4 }), 'revealed') })
+      deliver(rerender, leaderboardSnap('q-2', ['c', 'a', 'b']))
+
+      const before = container.querySelector('li .sr-only')?.textContent
+      expect(before).toBe(strings.display.leaderboard.climbedLabel(2))
+
+      // Same question, same board, a brand-new frame.
+      const repeat = leaderboardSnap('q-2', ['c', 'a', 'b'])
+      deliver(rerender, { ...repeat, displaySettings: { reducedMotion: false } })
+
+      expect(container.querySelector('li .sr-only')?.textContent).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

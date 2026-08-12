@@ -66,6 +66,7 @@ type Store interface {
 	RevealCurrentQuestionAndAwardPoints(ctx context.Context, gameID, organizerID string, points []store.AnswerPointsParams) (gen.Game, error)
 	GetLeaderboard(ctx context.Context, gameID string) ([]store.ParticipantScore, error)
 	ListAnswerResultsForQuestion(ctx context.Context, gameID string, position int32) ([]store.AnswerResultRow, error)
+	ShowLeaderboard(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error)
 	FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error)
 	GetOpenQuestionForPlayer(ctx context.Context, phone string) (gen.GetOpenQuestionForPlayerRow, error)
@@ -388,19 +389,58 @@ func (e *Engine) Reveal(ctx context.Context, gameID, organizerID string) (Snapsh
 	return e.snapshotAfterCommit(ctx, g), g.CurrentQuestionPosition, nil
 }
 
-// NextQuestion transitions gameID from revealed to question_open on the
-// next question, or to finished when the revealed question was the last
-// one — this is the "skip the Leaderboard" path (see story Dev Notes); this
-// story never implements a control that enters the leaderboard state. A
-// game not currently revealed (including one that lost a concurrent
-// transition race) is ErrNotRevealed; a missing/foreign game is
-// store.ErrNotFound.
-func (e *Engine) NextQuestion(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
+// ShowLeaderboard transitions gameID from revealed to leaderboard — the
+// Leaderboard pause between questions (FR-13, FR-18, story 4.5), and the
+// sixth and last of the live-game transitions. Story 3.1 built the other
+// five and deliberately left this one out until a surface existed to render
+// a leaderboard on; story 4.5 is that surface.
+//
+// current_question_position deliberately does not move (queries/games.sql):
+// the Leaderboard is a pause ON the question just revealed, not a step past
+// it. buildSnapshot therefore still resolves a CurrentQuestion here, which
+// the Audience Display keys its movement baseline on.
+//
+// A game not currently revealed (including one that lost a concurrent
+// transition race) is ErrNotRevealed — deliberately the same error
+// NextQuestion returns, because it is the same precondition; a
+// missing/foreign game is store.ErrNotFound.
+func (e *Engine) ShowLeaderboard(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
 	g, err := e.store.GetGameForOrganizer(ctx, gameID, organizerID)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	if g.State != StateRevealed {
+		return Snapshot{}, ErrNotRevealed
+	}
+	g, err = e.store.ShowLeaderboard(ctx, gameID, organizerID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// Race-loss reinterpretation, same as every other transition
+			// here: the guard (state = 'revealed') lost the race between
+			// the read above and this write. The read is not redundant —
+			// it is this file's "read for message accuracy, write-guard
+			// for the race" discipline.
+			return Snapshot{}, ErrNotRevealed
+		}
+		return Snapshot{}, err
+	}
+	return e.snapshotAfterCommit(ctx, g), nil
+}
+
+// NextQuestion transitions gameID from revealed OR leaderboard to
+// question_open on the next question, or to finished when the revealed
+// question was the last one. From revealed it is the "skip the Leaderboard"
+// path (FR-13, UJ-4); from leaderboard it is the ordinary way out of the
+// pause — both take the identical write, because ShowLeaderboard does not
+// move current_question_position. A game in neither state (including one
+// that lost a concurrent transition race) is ErrNotRevealed; a
+// missing/foreign game is store.ErrNotFound.
+func (e *Engine) NextQuestion(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
+	g, err := e.store.GetGameForOrganizer(ctx, gameID, organizerID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if g.State != StateRevealed && g.State != StateLeaderboard {
 		return Snapshot{}, ErrNotRevealed
 	}
 	questions, err := e.store.ListQuestionsByGame(ctx, gameID, organizerID)
@@ -423,8 +463,9 @@ func (e *Engine) NextQuestion(ctx context.Context, gameID, organizerID string) (
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			// Same race-loss reinterpretation as OpenLobby: the guard
-			// (state = 'revealed') lost the race between the read above and
-			// this write, whichever of the two writes above ran.
+			// (state IN ('revealed','leaderboard') on OpenNextQuestion,
+			// the wider stoppable list on FinishGame) lost the race between
+			// the read above and this write, whichever of the two ran.
 			return Snapshot{}, ErrNotRevealed
 		}
 		return Snapshot{}, err
@@ -433,18 +474,21 @@ func (e *Engine) NextQuestion(ctx context.Context, gameID, organizerID string) (
 }
 
 // StopGame aborts a live round by transitioning gameID to finished from
-// question_open, question_closed, or revealed — not callable from draft,
-// lobby, or finished (see story Dev Notes on why lobby-abandonment is out
-// of scope). A game in a non-stoppable state (including one that lost a
-// concurrent transition race) is ErrNotStoppable; a missing/foreign game is
-// store.ErrNotFound.
+// question_open, question_closed, revealed, or leaderboard — not callable
+// from draft, lobby, or finished (see story 3.1's Dev Notes on why
+// lobby-abandonment is out of scope). leaderboard joined the list in story
+// 4.5, the story that made the state reachable at all: without it an
+// organizer standing on the Leaderboard would find every exit returning 409
+// in front of a room. A game in a non-stoppable state (including one that
+// lost a concurrent transition race) is ErrNotStoppable; a missing/foreign
+// game is store.ErrNotFound.
 func (e *Engine) StopGame(ctx context.Context, gameID, organizerID string) (Snapshot, error) {
 	g, err := e.store.GetGameForOrganizer(ctx, gameID, organizerID)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	switch g.State {
-	case StateQuestionOpen, StateQuestionClosed, StateRevealed:
+	case StateQuestionOpen, StateQuestionClosed, StateRevealed, StateLeaderboard:
 	default:
 		return Snapshot{}, ErrNotStoppable
 	}

@@ -87,6 +87,7 @@ func NewRouter(db Pinger, authSvc AuthService, games GameStore, static fs.FS, we
 						gr.Post("/start", handleStartGame(engine, hub, dispatcher))
 						gr.Post("/close-question", handleCloseQuestion(engine, hub))
 						gr.Post("/reveal", handleReveal(engine, hub, resultDispatcher))
+						gr.Post("/show-leaderboard", handleShowLeaderboard(engine, hub))
 						gr.Post("/next-question", handleNextQuestion(engine, hub, dispatcher, finalDispatcher))
 						gr.Post("/stop", handleStopGame(engine, hub, finalDispatcher))
 						// Inside the guard deliberately, unlike /results

@@ -542,6 +542,21 @@ func TestNilEngineOrHubOmitsOpenLobbyRouteWithoutPanicking(t *testing.T) {
 	}
 }
 
+func TestNilEngineOrHubOmitsShowLeaderboardRoute(t *testing.T) {
+	// The seventh route registered inside the engine/hub guard (story 4.5)
+	// must live inside it like its six neighbours, not beside /results and
+	// /scoring outside it: it genuinely needs both, so a router built with
+	// nil for either must answer 404 rather than panic on a nil interface.
+	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, nil, nil, nil, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/show-leaderboard", ""))
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("authenticated POST /show-leaderboard with nil engine/hub = %d, want 404 (route not registered, not a panic)", rec.Code)
+	}
+}
+
 func TestAPIBehaviorUnchangedWithWebhookMounted(t *testing.T) {
 	// Mounting the webhook branch must not disturb existing /api routing.
 	router := NewRouter(stubPinger{}, noAuth(), noGames(), testStatic(), &stubWebhookHandler{}, nil, nil, nil, nil, nil, nil)

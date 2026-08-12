@@ -112,9 +112,36 @@ WHERE g.id = $1 AND g.organizer_id = $2 AND g.state = 'question_closed'
   AND NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.stage IS NULL)
 RETURNING g.*;
 
--- Same shape as StartGameFirstQuestion, guarded from 'revealed' instead of
--- 'lobby' and parameterized on the target position (current + 1) instead of
--- hardcoding 1.
+-- The Leaderboard pause (FR-13, FR-18, story 4.5) — the last of the
+-- live-game transitions, and the one story 3.1 deliberately left out:
+-- nothing could render a leaderboard until the Audience Display
+-- existed, and a control with nothing to show it on is speculative
+-- work.
+--
+-- current_question_position deliberately does NOT move. The Leaderboard
+-- is a pause on the question just revealed, not a step past it:
+-- buildSnapshot still has to resolve a CurrentQuestion here, and the
+-- display keys its movement baseline on that question's id (story 4.5,
+-- derived requirement 7).
+--
+-- Guarded on state = 'revealed' like every other transition in this
+-- file, so a lost race returns zero rows -> store.ErrNotFound -> the
+-- engine's existing ErrNotRevealed -> the 409 the organizer already
+-- gets from next-question. No new error type: this IS that precondition.
+-- name: ShowLeaderboard :one
+UPDATE games
+SET state = 'leaderboard',
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $2 AND state = 'revealed'
+RETURNING *;
+
+-- Same shape as StartGameFirstQuestion, guarded from 'revealed' or
+-- 'leaderboard' instead of 'lobby', and parameterized on the target position
+-- (current + 1) instead of hardcoding 1. Both source states, because the
+-- Leaderboard is skippable (FR-13): the next question opens either straight
+-- off the reveal (UJ-4's skip) or from the far side of the Leaderboard pause,
+-- and current_question_position is identical in both cases — ShowLeaderboard
+-- does not move it (story 4.5, derived requirements 4 and 5).
 -- name: OpenNextQuestion :one
 UPDATE games g
 SET state = 'question_open',
@@ -122,7 +149,8 @@ SET state = 'question_open',
     answer_cutoff_at = now() + (q.time_limit_seconds || ' seconds')::interval,
     updated_at = now()
 FROM questions q
-WHERE g.id = sqlc.arg(id) AND g.organizer_id = sqlc.arg(organizer_id) AND g.state = 'revealed'
+WHERE g.id = sqlc.arg(id) AND g.organizer_id = sqlc.arg(organizer_id)
+  AND g.state IN ('revealed', 'leaderboard')
   AND q.game_id = g.id AND q.position = sqlc.arg(position)
 RETURNING g.*;
 
@@ -132,10 +160,17 @@ RETURNING g.*;
 -- the migration's own invariant is that 0 means "no question open", mirroring
 -- draft/lobby/finished — leaving a stale position here would make buildSnapshot
 -- keep reporting a currentQuestion for a game that already ended.
+--
+-- 'leaderboard' is in the list for BOTH callers (story 4.5, derived
+-- requirement 5). NextQuestion needs it so the Leaderboard shown after the
+-- LAST question can still end the game; StopGame needs it so an organizer
+-- who stops from the Leaderboard is not stranded. Without it the Leaderboard
+-- would be a state with no exit at all — every control returning 409 in
+-- front of a room.
 -- name: FinishGame :one
 UPDATE games
 SET state = 'finished',
     current_question_position = 0,
     updated_at = now()
-WHERE id = $1 AND organizer_id = $2 AND state IN ('question_open','question_closed','revealed')
+WHERE id = $1 AND organizer_id = $2 AND state IN ('question_open','question_closed','revealed','leaderboard')
 RETURNING *;

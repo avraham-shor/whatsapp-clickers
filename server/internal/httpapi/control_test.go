@@ -38,6 +38,13 @@ type stubControlEngine struct {
 	revealErr          error
 	revealRequestedFor [][2]string
 
+	// Unguarded like its neighbours: handleShowLeaderboard spawns no
+	// dispatch goroutine at all (story 4.5 — the Leaderboard is quiet on
+	// WhatsApp), so nothing outside the request goroutine touches these.
+	showLeaderboardSnapshot     game.Snapshot
+	showLeaderboardErr          error
+	showLeaderboardRequestedFor [][2]string
+
 	nextQuestionSnapshot     game.Snapshot
 	nextQuestionErr          error
 	nextQuestionRequestedFor [][2]string
@@ -119,6 +126,11 @@ func (s *stubControlEngine) CloseQuestion(ctx context.Context, gameID, organizer
 func (s *stubControlEngine) Reveal(ctx context.Context, gameID, organizerID string) (game.Snapshot, int32, error) {
 	s.revealRequestedFor = append(s.revealRequestedFor, [2]string{gameID, organizerID})
 	return s.revealSnapshot, s.revealPosition, s.revealErr
+}
+
+func (s *stubControlEngine) ShowLeaderboard(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
+	s.showLeaderboardRequestedFor = append(s.showLeaderboardRequestedFor, [2]string{gameID, organizerID})
+	return s.showLeaderboardSnapshot, s.showLeaderboardErr
 }
 
 func (s *stubControlEngine) NextQuestion(ctx context.Context, gameID, organizerID string) (game.Snapshot, error) {
@@ -440,10 +452,11 @@ func TestOpenLobbyWithoutSessionReturns401(t *testing.T) {
 	}
 }
 
-// controlActionCase describes one of the five live-control actions this
-// story adds (everything past open-lobby), so the success/error/404/401
-// suite below (mirroring the TestOpenLobby* suite above) runs once per
-// action instead of being duplicated by hand five times.
+// controlActionCase describes one live-control action past open-lobby, so
+// the success/error/404/401 suite below (mirroring the TestOpenLobby* suite
+// above) runs once per action instead of being duplicated by hand. Five at
+// story 3.1; six since story 4.5 added show-leaderboard, the transition 3.1
+// deliberately left out.
 type controlActionCase struct {
 	name         string
 	path         string
@@ -481,6 +494,18 @@ var controlActionCases = []controlActionCase{
 		setSnapshot:  func(e *stubControlEngine, s game.Snapshot) { e.revealSnapshot = s },
 		setErr:       func(e *stubControlEngine, err error) { e.revealErr = err },
 		requestedFor: func(e *stubControlEngine) [][2]string { return e.revealRequestedFor },
+	},
+	{
+		// Shares NextQuestion's error and code on purpose: entering the
+		// Leaderboard and skipping it are the same precondition (the game
+		// must be revealed), so story 4.5 added no seventh error type.
+		name:         "ShowLeaderboard",
+		path:         "/show-leaderboard",
+		domainErr:    game.ErrNotRevealed,
+		domainCode:   "GAME_NOT_REVEALED",
+		setSnapshot:  func(e *stubControlEngine, s game.Snapshot) { e.showLeaderboardSnapshot = s },
+		setErr:       func(e *stubControlEngine, err error) { e.showLeaderboardErr = err },
+		requestedFor: func(e *stubControlEngine) [][2]string { return e.showLeaderboardRequestedFor },
 	},
 	{
 		name:         "NextQuestion",
@@ -916,6 +941,71 @@ func TestOtherControlActionsNeverDispatchResults(t *testing.T) {
 	}
 	if got := engine.ResultsForRevealedQuestionRequestedFor(); len(got) != 0 {
 		t.Errorf("ResultsForRevealedQuestion called %d times, want 0 for /close-question", len(got))
+	}
+}
+
+func TestShowLeaderboardDispatchesNoWhatsAppTrafficAtAll(t *testing.T) {
+	// The Leaderboard is the only transition that is silent on WhatsApp
+	// (EXPERIENCE.md's State Patterns table: "— (quiet)"). handleShowLeaderboard
+	// takes no dispatcher parameter, so this is true by construction — but
+	// "by construction" is exactly what a later refactor breaks quietly, and
+	// the failure mode is a whole room's phones buzzing between questions.
+	// All three dispatchers are wired in and all three must stay silent.
+	question := game.CurrentQuestion{ID: "q1", Position: 1, Type: "mcq", Text: "1+1?", Options: []string{"1", "2", "3", "4"}, TimeLimitSeconds: 20}
+	engine := &stubControlEngine{
+		showLeaderboardSnapshot: game.Snapshot{GameID: testGameID, State: "leaderboard", CurrentQuestion: &question},
+		playerRecipients:        []string{"+972500000001"},
+	}
+	hub := &stubBroadcaster{}
+	// Buffered signal channels on all three, because the assertion below is a
+	// NEGATIVE one and needs something to wait on. Buffered so a regression
+	// that did dispatch records its call and returns rather than blocking on
+	// an unread channel.
+	questionDispatcher := &stubQuestionDispatcher{done: make(chan struct{}, 1)}
+	resultDispatcher := &stubResultDispatcher{done: make(chan struct{}, 1)}
+	finalDispatcher := &stubFinalDispatcher{done: make(chan struct{}, 1)}
+	svc := &stubAuth{authOrg: auth.Organizer{ID: "org-1", Username: "avraham"}}
+	router := NewRouter(stubPinger{}, svc, noGames(), testStatic(), nil, engine, hub, nil, questionDispatcher, resultDispatcher, finalDispatcher)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/games/"+testGameID+"/show-leaderboard", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /show-leaderboard = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	if len(hub.calls) != 1 {
+		t.Errorf("Broadcast called %d times, want exactly 1 — the room's screen is the only thing this transition talks to", len(hub.calls))
+	}
+
+	// Every sibling handler dispatches from a goroutine spawned AFTER the
+	// response is written (control.go: handleStartGame, handleReveal,
+	// handleNextQuestion, handleStopGame). Reading the counters straight after
+	// ServeHTTP therefore proves nothing: a refactor that added a `go
+	// dispatch…` here would almost never have been scheduled by then, so the
+	// counters would read 0 and this test would pass over the exact regression
+	// it exists to catch. Wait for a signal that must never arrive instead,
+	// and only then read them. (Code review, 2026-08-12.)
+	select {
+	case <-questionDispatcher.done:
+		t.Fatal("DispatchQuestionOpened fired — EXPERIENCE.md gives the Leaderboard row \"— (quiet)\" on WhatsApp")
+	case <-resultDispatcher.done:
+		t.Fatal("DispatchAnswerRevealed fired — EXPERIENCE.md gives the Leaderboard row \"— (quiet)\" on WhatsApp")
+	case <-finalDispatcher.done:
+		t.Fatal("DispatchGameFinished fired — EXPERIENCE.md gives the Leaderboard row \"— (quiet)\" on WhatsApp")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if calls := questionDispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchQuestionOpened called %d times, want 0", len(calls))
+	}
+	if calls := resultDispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchAnswerRevealed called %d times, want 0", len(calls))
+	}
+	if calls := finalDispatcher.Calls(); len(calls) != 0 {
+		t.Errorf("DispatchGameFinished called %d times, want 0", len(calls))
+	}
+	if got := engine.PlayerRecipientsRequestedFor(); len(got) != 0 {
+		t.Errorf("PlayerRecipients called %d times, want 0 — nothing here needs a recipient list", len(got))
 	}
 }
 

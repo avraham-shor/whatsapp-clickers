@@ -83,6 +83,13 @@ type stubStore struct {
 	listAnswerResultsForQuestionResult []store.AnswerResultRow
 	listAnswerResultsForQuestionErr    error
 
+	// The sixth transition (story 4.5). Zero value is the empty game, which
+	// no pre-4.5 test reaches: the call counter is what proves the write
+	// never runs from a state that must reject it.
+	showLeaderboardResult gen.Game
+	showLeaderboardErr    error
+	showLeaderboardCalls  int
+
 	openNextQuestionResult   gen.Game
 	openNextQuestionErr      error
 	openNextQuestionCalls    int
@@ -224,6 +231,11 @@ func (s *stubStore) ListAnswerResultsForQuestion(ctx context.Context, gameID str
 	return s.listAnswerResultsForQuestionResult, s.listAnswerResultsForQuestionErr
 }
 
+func (s *stubStore) ShowLeaderboard(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	s.showLeaderboardCalls++
+	return s.showLeaderboardResult, s.showLeaderboardErr
+}
+
 func (s *stubStore) OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error) {
 	s.openNextQuestionCalls++
 	s.openNextQuestionPosition = position
@@ -343,10 +355,44 @@ func revealedStub() *stubStore {
 	return &stubStore{
 		game:                      g,
 		listQuestionsByGameResult: twoQuestions(),
+		// ShowLeaderboard does NOT move current_question_position (story
+		// 4.5, derived requirement 4) — the committed row this stub returns
+		// carries position 1 for exactly that reason, and the test below
+		// asserts it rather than trusting it.
+		showLeaderboardResult: gen.Game{
+			ID: testGameID, OrganizerID: testOrganizerID, State: StateLeaderboard, JoinCode: "AB2CD3",
+			CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff,
+		},
 		openNextQuestionResult: gen.Game{
 			ID: testGameID, OrganizerID: testOrganizerID, State: StateQuestionOpen, JoinCode: "AB2CD3",
 			CurrentQuestionPosition: 2, AnswerCutoffAt: testCutoff,
 		},
+	}
+}
+
+// leaderboardStub is the Leaderboard pause on question 1, with a second
+// question waiting at position 2 — the state story 4.5 made reachable.
+func leaderboardStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateLeaderboard, JoinCode: "AB2CD3", CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff}
+	return &stubStore{
+		game:                      g,
+		listQuestionsByGameResult: twoQuestions(),
+		openNextQuestionResult: gen.Game{
+			ID: testGameID, OrganizerID: testOrganizerID, State: StateQuestionOpen, JoinCode: "AB2CD3",
+			CurrentQuestionPosition: 2, AnswerCutoffAt: testCutoff,
+		},
+		finishGameResult: gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateFinished, JoinCode: "AB2CD3"},
+	}
+}
+
+// leaderboardLastQuestionStub is the Leaderboard pause on the LAST question:
+// the only way out is finishing the game.
+func leaderboardLastQuestionStub() *stubStore {
+	g := gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateLeaderboard, JoinCode: "AB2CD3", CurrentQuestionPosition: 1, AnswerCutoffAt: testCutoff}
+	return &stubStore{
+		game:                      g,
+		listQuestionsByGameResult: oneQuestion(),
+		finishGameResult:          gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateFinished, JoinCode: "AB2CD3"},
 	}
 }
 
@@ -1216,6 +1262,79 @@ func TestRevealComputesAndPersistsSpeedBonusPoints(t *testing.T) {
 	}
 }
 
+// --- ShowLeaderboard (story 4.5) ---
+
+func TestShowLeaderboardFromRevealedKeepsTheRevealedQuestion(t *testing.T) {
+	st := revealedStub()
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.ShowLeaderboard(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("ShowLeaderboard() err = %v, want nil", err)
+	}
+	if snap.State != StateLeaderboard {
+		t.Errorf("State = %q, want leaderboard", snap.State)
+	}
+	// Derived requirement 4: the Leaderboard is a pause ON the revealed
+	// question, and the Audience Display keys its movement baseline on that
+	// question's id. A transition that advanced the position would move the
+	// baseline key underneath the display and silently erase every arrow.
+	if snap.CurrentQuestion == nil {
+		t.Fatalf("CurrentQuestion = nil, want the revealed question still resolved")
+	}
+	if snap.CurrentQuestion.Position != 1 {
+		t.Errorf("CurrentQuestion.Position = %d, want 1 (unchanged by the transition)", snap.CurrentQuestion.Position)
+	}
+	if snap.CurrentQuestion.ID != "q1" {
+		t.Errorf("CurrentQuestion.ID = %q, want q1", snap.CurrentQuestion.ID)
+	}
+	if st.showLeaderboardCalls != 1 {
+		t.Errorf("ShowLeaderboard called %d times, want 1", st.showLeaderboardCalls)
+	}
+	if st.openNextQuestionCalls != 0 || st.finishGameCalls != 0 {
+		t.Errorf("other transition writes ran (open=%d finish=%d), want 0/0", st.openNextQuestionCalls, st.finishGameCalls)
+	}
+}
+
+func TestShowLeaderboardFromNonRevealedReturnsErrNotRevealedWithoutWriting(t *testing.T) {
+	for _, state := range []State{StateDraft, StateLobby, StateQuestionOpen, StateQuestionClosed, StateLeaderboard, StateFinished} {
+		st := revealedStub()
+		st.game.State = state
+		e := NewEngine(st, "+972 50-000-0000", nil)
+
+		_, err := e.ShowLeaderboard(context.Background(), testGameID, testOrganizerID)
+		if !errors.Is(err, ErrNotRevealed) {
+			t.Errorf("ShowLeaderboard() from %s err = %v, want ErrNotRevealed", state, err)
+		}
+		// The call counter, not only the error: an engine that returned the
+		// right error AFTER writing would pass an error-only assertion.
+		if st.showLeaderboardCalls != 0 {
+			t.Errorf("ShowLeaderboard() from %s: store write called %d times, want 0", state, st.showLeaderboardCalls)
+		}
+	}
+}
+
+func TestShowLeaderboardRaceLossReturnsErrNotRevealed(t *testing.T) {
+	st := revealedStub()
+	st.showLeaderboardErr = store.ErrNotFound
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.ShowLeaderboard(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, ErrNotRevealed) {
+		t.Fatalf("ShowLeaderboard() err = %v, want ErrNotRevealed (race loss reinterpreted)", err)
+	}
+}
+
+func TestShowLeaderboardMissingOrForeignGameReturnsErrNotFound(t *testing.T) {
+	st := &stubStore{gameErr: store.ErrNotFound}
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	_, err := e.ShowLeaderboard(context.Background(), testGameID, testOrganizerID)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ShowLeaderboard() err = %v, want store.ErrNotFound", err)
+	}
+}
+
 // --- NextQuestion ---
 
 func TestNextQuestionOpensNextQuestionWhenOneExists(t *testing.T) {
@@ -1266,17 +1385,66 @@ func TestNextQuestionFinishesGameWhenNoNextQuestionExists(t *testing.T) {
 	}
 }
 
-func TestNextQuestionFromNonRevealedReturnsErrNotRevealedWithoutWriting(t *testing.T) {
-	st := revealedStub()
-	st.game.State = StateQuestionClosed
+// The Leaderboard is not a trap: both ways out of it are separate store
+// writes, so each needs its own case (story 4.5, derived requirement 5).
+func TestNextQuestionFromLeaderboardOpensTheNextQuestion(t *testing.T) {
+	st := leaderboardStub()
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
-	if !errors.Is(err, ErrNotRevealed) {
-		t.Fatalf("NextQuestion() err = %v, want ErrNotRevealed", err)
+	snap, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("NextQuestion() from leaderboard err = %v, want nil", err)
 	}
-	if st.openNextQuestionCalls != 0 || st.finishGameCalls != 0 {
-		t.Errorf("write called (open=%d finish=%d), want 0/0", st.openNextQuestionCalls, st.finishGameCalls)
+	if snap.State != StateQuestionOpen {
+		t.Errorf("State = %q, want question_open", snap.State)
+	}
+	if snap.CurrentQuestion == nil || snap.CurrentQuestion.Position != 2 {
+		t.Fatalf("CurrentQuestion = %+v, want position 2", snap.CurrentQuestion)
+	}
+	if st.openNextQuestionCalls != 1 || st.openNextQuestionPosition != 2 {
+		t.Errorf("OpenNextQuestion called %d times at position %d, want 1 call at position 2", st.openNextQuestionCalls, st.openNextQuestionPosition)
+	}
+	if st.finishGameCalls != 0 {
+		t.Errorf("FinishGame called %d times, want 0", st.finishGameCalls)
+	}
+}
+
+func TestNextQuestionFromLeaderboardOnLastQuestionFinishesTheGame(t *testing.T) {
+	st := leaderboardLastQuestionStub()
+	e := NewEngine(st, "+972 50-000-0000", nil)
+
+	snap, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
+	if err != nil {
+		t.Fatalf("NextQuestion() from leaderboard err = %v, want nil", err)
+	}
+	if snap.State != StateFinished {
+		t.Errorf("State = %q, want finished", snap.State)
+	}
+	if st.finishGameCalls != 1 {
+		t.Errorf("FinishGame called %d times, want 1", st.finishGameCalls)
+	}
+	if st.openNextQuestionCalls != 0 {
+		t.Errorf("OpenNextQuestion called %d times, want 0", st.openNextQuestionCalls)
+	}
+}
+
+// The negative control that makes the two cases above meaningful: widening
+// NextQuestion's guard to admit leaderboard must not admit anything else.
+// question_open is the sharp one — an organizer who double-clicks past a
+// live question would skip it entirely.
+func TestNextQuestionFromNonRevealedReturnsErrNotRevealedWithoutWriting(t *testing.T) {
+	for _, state := range []State{StateDraft, StateLobby, StateQuestionOpen, StateQuestionClosed, StateFinished} {
+		st := revealedStub()
+		st.game.State = state
+		e := NewEngine(st, "+972 50-000-0000", nil)
+
+		_, err := e.NextQuestion(context.Background(), testGameID, testOrganizerID)
+		if !errors.Is(err, ErrNotRevealed) {
+			t.Errorf("NextQuestion() from %s err = %v, want ErrNotRevealed", state, err)
+		}
+		if st.openNextQuestionCalls != 0 || st.finishGameCalls != 0 {
+			t.Errorf("NextQuestion() from %s: write called (open=%d finish=%d), want 0/0", state, st.openNextQuestionCalls, st.finishGameCalls)
+		}
 	}
 }
 
@@ -1294,7 +1462,10 @@ func TestNextQuestionRaceLossReturnsErrNotRevealed(t *testing.T) {
 // --- StopGame ---
 
 func TestStopGameAllowedStatesFinishTheGame(t *testing.T) {
-	for _, state := range []State{StateQuestionOpen, StateQuestionClosed, StateRevealed} {
+	// StateLeaderboard joined this list in story 4.5: it is the state that
+	// story made reachable, and an organizer standing on the Leaderboard
+	// with no working "עצור" would be stuck in front of a room.
+	for _, state := range []State{StateQuestionOpen, StateQuestionClosed, StateRevealed, StateLeaderboard} {
 		st := &stubStore{
 			game:             gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: state, JoinCode: "AB2CD3"},
 			finishGameResult: gen.Game{ID: testGameID, OrganizerID: testOrganizerID, State: StateFinished, JoinCode: "AB2CD3"},
