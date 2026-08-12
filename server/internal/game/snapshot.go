@@ -31,12 +31,38 @@ type ParticipantSummary struct {
 	DisplayName string `json:"displayName"`
 }
 
+// QuestionReveal carries what the Audience Display needs to mark the
+// answer, and it is present ONLY while games.state = 'revealed' (story
+// 4.4). That state IS the gate: before the Organizer reveals, the field
+// is nil and the correct answer is nowhere on the wire, which is the
+// property CurrentQuestion's doc comment used to hold absolutely.
+//
+// Not role-conditional: one Snapshot serves both role=host and
+// role=display over the same WS envelope, and both are authenticated
+// with the Organizer's own session. Participants never receive a
+// snapshot at all — they are on WhatsApp.
+type QuestionReveal struct {
+	// 1-based index into Options; mcq only. omitempty drops the
+	// free_text sentinel 0 (questions_type_shape guarantees 1..4 for
+	// mcq, so a real value is never dropped).
+	CorrectOption int `json:"correctOption,omitempty"`
+	// The first Accepted Answer — "the primary form shown at Reveal"
+	// (EXPERIENCE.md Content Rules, A15); free_text only.
+	AcceptedAnswer string `json:"acceptedAnswer,omitempty"`
+	// Answers per option, index-aligned with Options; mcq only.
+	OptionCounts []int `json:"optionCounts,omitempty"`
+	// Answers graded correct. NO omitempty: 0 correct is a real and
+	// interesting number, and dropping it would make the free-text
+	// counts line render its count as "undefined".
+	CorrectCount int `json:"correctCount"`
+}
+
 // CurrentQuestion is the question a live control panel (or, from Epic 4, an
 // Audience Display) renders while a round is in progress. It deliberately
-// omits CorrectOption/AcceptedAnswers — always, at every state, including
-// revealed — since Snapshot is the one payload both role=host and
-// role=display receive over the same WS envelope; leaking the correct
-// answer here would hand it out with no separate reveal gate to add later.
+// omits CorrectOption/AcceptedAnswers at every state EXCEPT revealed, where
+// the nested Reveal below carries them — Snapshot is the one payload both
+// role=host and role=display receive over the same WS envelope, so the
+// state is the only gate there is, and it is the gate (story 4.4).
 type CurrentQuestion struct {
 	ID               string   `json:"id"`
 	Position         int      `json:"position"`
@@ -46,4 +72,9 @@ type CurrentQuestion struct {
 	TimeLimitSeconds int      `json:"timeLimitSeconds"`
 	AnswerCutoffAt   string   `json:"answerCutoffAt"` // RFC 3339 UTC
 	AnsweredCount    int      `json:"answeredCount"`
+	// Pointer with no omitempty, so the wire always carries
+	// "reveal": null before the reveal rather than omitting the key —
+	// an absent key and a null both read as null in TS, but an explicit
+	// null is self-documenting in a captured frame.
+	Reveal *QuestionReveal `json:"reveal"`
 }

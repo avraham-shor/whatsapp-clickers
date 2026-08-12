@@ -284,5 +284,30 @@ export const strings = {
       // threshold is the event, not the number.
       urgentAnnouncement: 'חמש שניות אחרונות',
     },
+    // Reveal stage (story 4.4).
+    //
+    // As with `question`, live.answeredStat is NOT redefined here - the
+    // free-text counts line composes it with correctStat at the call site
+    // rather than restating "ענו" a third time.
+    reveal: {
+      // DESIGN.md stage-option-correct / stage-answer-card / distribution-bar
+      // all specify "✓" as the icon. One constant, so the option, the card
+      // and the bar label cannot drift onto three different glyphs.
+      correctMark: '✓',
+      // [ASSUMPTION]: UX-DR14 requires the ✓ to be aria-labeled but gives no
+      // wording. Gender-neutral (A2), states the fact rather than the glyph.
+      correctOptionLabel: 'התשובה הנכונה',
+      // "54 · 71%" - mockups/key-stage-reveal.html's bar label verbatim.
+      // Rendered inside <bdi dir="ltr"> by the stage: it is an all-digit run
+      // in an RTL paragraph and the bidi algorithm has no strong character
+      // to anchor it (DESIGN.md Typography: bidi isolation is mandatory).
+      distributionLabel: (count: number, percent: number) => `${count} · ${percent}%`,
+      // The "Y צדקו" half of EXPERIENCE.md's Free-Text reveal counts line
+      // "X ענו · Y צדקו"; the "X ענו" half is strings.live.answeredStat.
+      // Near-duplicate of results.correctColumn ('צדקו'), deliberately not
+      // reused: that one is a table COLUMN HEADER on the dashboard and a
+      // later copy change to either surface must not silently move the other.
+      correctStat: (count: number) => `${count} צדקו`,
+    },
   },
 } as const

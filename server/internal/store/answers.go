@@ -101,6 +101,30 @@ func (s *Store) CountAnswersByQuestion(ctx context.Context, questionID string) (
 	return s.q.CountAnswersByQuestion(ctx, questionID)
 }
 
+// ListAnswerCountsByResponse returns one row per distinct response value
+// recorded for questionID, with how many answers carry it — the Reveal's
+// MCQ answer distribution (FR-10, story 4.4). Called only at
+// games.state = 'revealed', never on the answered-count hot path above.
+//
+// No pgx.ErrNoRows remap: a :many with no rows is not ErrNoRows, it is an
+// empty slice — a question nobody answered, which the caller renders as
+// four empty bars rather than as a failure. Same posture as
+// ListQuestionResponseStats.
+func (s *Store) ListAnswerCountsByResponse(ctx context.Context, questionID string) ([]gen.ListAnswerCountsByResponseRow, error) {
+	return s.q.ListAnswerCountsByResponse(ctx, questionID)
+}
+
+// CountCorrectAnswersByQuestion returns how many of questionID's answers
+// were graded correct — the Reveal's "Y correct" figure for both question
+// types (FR-10, story 4.4).
+//
+// No pgx.ErrNoRows remap either: the aggregate always returns exactly one
+// row, reading 0 for a question nobody got right (that is what the FILTER
+// buys over a WHERE).
+func (s *Store) CountCorrectAnswersByQuestion(ctx context.Context, questionID string) (int32, error) {
+	return s.q.CountCorrectAnswersByQuestion(ctx, questionID)
+}
+
 // CountUngradedAnswersForCurrentQuestion returns how many recorded
 // answers for gameID's current question have not yet been graded
 // (stage IS NULL) — the Reveal-gate pre-check (FR-16 epic AC-3).

@@ -27,6 +27,28 @@ func (q *Queries) CountAnswersByQuestion(ctx context.Context, questionID string)
 	return count, err
 }
 
+const countCorrectAnswersByQuestion = `-- name: CountCorrectAnswersByQuestion :one
+SELECT (count(*) FILTER (WHERE a.is_correct))::int AS correct_count
+FROM answers a WHERE a.question_id = $1
+`
+
+// The Reveal's "Y correct" (FR-10, story 4.4), for both question types.
+// FILTER rather than a WHERE, so a question nobody got right still
+// returns one row reading 0 instead of no rows.
+//
+// is_correct is NOT NULL by the time this runs: Reveal is gated on
+// CountUngradedAnswersForCurrentQuestion == 0 plus
+// RevealCurrentQuestion's own NOT EXISTS write-guard, so every answer
+// for this question is graded before the state can be 'revealed'.
+// A NULL would count as not-correct, which is also the fail-closed
+// direction (FR-16).
+func (q *Queries) CountCorrectAnswersByQuestion(ctx context.Context, questionID string) (int32, error) {
+	row := q.db.QueryRow(ctx, countCorrectAnswersByQuestion, questionID)
+	var correct_count int32
+	err := row.Scan(&correct_count)
+	return correct_count, err
+}
+
 const countUngradedAnswersForCurrentQuestion = `-- name: CountUngradedAnswersForCurrentQuestion :one
 SELECT count(*) FROM answers a
 JOIN questions q ON q.id = a.question_id
@@ -230,6 +252,52 @@ func (q *Queries) GetOpenQuestionForPlayer(ctx context.Context, phone string) (G
 		&i.AlreadyAnswered,
 	)
 	return i, err
+}
+
+const listAnswerCountsByResponse = `-- name: ListAnswerCountsByResponse :many
+SELECT a.response, count(*)::int AS answer_count
+FROM answers a
+WHERE a.question_id = $1
+GROUP BY a.response
+`
+
+type ListAnswerCountsByResponseRow struct {
+	Response    string
+	AnswerCount int32
+}
+
+// The Reveal's answer distribution (FR-10, story 4.4). MCQ only, and
+// called only when games.state = 'revealed' — never on the hot path
+// CountAnswersByQuestion above serves.
+//
+// GROUP BY response is exact rather than a heuristic: migration
+// 00010's comment on answers.response fixes MCQ storage as the
+// normalized "1".."4" (never the raw Hebrew letter), and
+// game.RecordAnswer is the only writer. Rows whose response falls
+// outside 1..cardinality(options) are returned like any other and
+// dropped by the caller — unreachable today, but the count must not
+// silently land on the wrong bar if it ever is.
+//
+// idx_answers_question_participant leads with question_id, so this is
+// an index scan plus a small group, same reasoning as the count above.
+func (q *Queries) ListAnswerCountsByResponse(ctx context.Context, questionID string) ([]ListAnswerCountsByResponseRow, error) {
+	rows, err := q.db.Query(ctx, listAnswerCountsByResponse, questionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAnswerCountsByResponseRow
+	for rows.Next() {
+		var i ListAnswerCountsByResponseRow
+		if err := rows.Scan(&i.Response, &i.AnswerCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAnswerResultsForQuestion = `-- name: ListAnswerResultsForQuestion :many
