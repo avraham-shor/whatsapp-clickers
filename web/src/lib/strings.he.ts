@@ -342,5 +342,38 @@ export const strings = {
       // later copy change to either must not move the other.
       noPlayers: 'אף אחד לא נרשם למשחק הזה.',
     },
+    // Winner takeover (story 4.6). Mirrors messages_he.go's Winner's-final-
+    // message tone ("מזל טוב, [שם]! 🏆 ניצחת עם [ניקוד] נקודות!") without
+    // repeating its exact wording — the projector composes name and score as
+    // separate visual elements (mockups/key-stage-winner.html), not one
+    // interpolated sentence.
+    winner: {
+      // mockups/key-stage-winner.html's w-tagline, verbatim. Gender/number
+      // neutral, so it needs no tie/no-tie variant.
+      tagline: 'מזל טוב!',
+      // [ASSUMPTION]: no score-suffix string exists yet for the display
+      // surface (messages_he.go's templates interpolate "X נקודות" inline
+      // in Go, not as a reusable fragment). One function so the digit-plus-
+      // suffix cannot drift from results.playerCountLabel's spelled-out-
+      // singular discipline elsewhere in this file — though a score has no
+      // natural "one point" singular concern the way a participant count
+      // does, so this is a plain suffix, not a pluralizing function.
+      //
+      // Rendered by winner-stage.tsx inside a PLAIN <bdi> (dir="auto"), not
+      // <bdi dir="ltr">: the composed value is a Hebrew sentence whose first
+      // strong character is Hebrew, so forcing LTR would mirror it and put
+      // the digits on the wrong side of the word. Auto isolates the run from
+      // its surroundings while resolving the direction correctly, and the
+      // digit run inside keeps its own LTR order by the bidi algorithm.
+      scoreSuffix: (score: number) => `${score} נקודות`,
+      // Distinct from display.leaderboard.noPlayers on purpose: that one
+      // describes an EMPTY roster; this one describes a roster where
+      // nobody's score cleared game/final.go's strict positivity condition
+      // (a stopped-before-first-reveal game, or genuinely nobody registered).
+      // Both collapse to "no winner to announce" and get one honest
+      // sentence, mirroring messages_he.go's msgFinalResultsNoWinner rather
+      // than inventing new wording for a case WhatsApp already names.
+      noWinner: 'המשחק נגמר! הפעם לא נצברו נקודות.',
+    },
   },
 } as const

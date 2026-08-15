@@ -10,6 +10,7 @@ import { QuestionStage } from './question-stage'
 import { RevealStage } from './reveal-stage'
 import { StagePlaceholder } from './stage-placeholder'
 import { useLeaderboardMemory } from './use-leaderboard-memory'
+import { WinnerStage } from './winner-stage'
 // The contract lives in its own module (story 4.3) and is deliberately NOT
 // re-exported from here: a `export type { StageProps } from './stage-props'`
 // would preserve the very import path whose value form recreates the cycle.
@@ -26,7 +27,7 @@ const stageByState: Record<GameState, ComponentType<StageProps>> = {
   question_closed: QuestionStage, // story 4.3 — question stage (timer at 0)
   revealed: RevealStage, // story 4.4 — reveal stage
   leaderboard: LeaderboardStage, // story 4.5 — leaderboard stage
-  finished: StagePlaceholder, // story 4.6 — winner takeover
+  finished: WinnerStage, // story 4.6 — winner takeover
 }
 
 const reducedMotionQuery = '(prefers-reduced-motion: reduce)'

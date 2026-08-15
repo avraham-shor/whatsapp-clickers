@@ -282,4 +282,57 @@ describe('DisplayPage', () => {
       vi.useRealTimers()
     }
   })
+
+  // --- The winner takeover (story 4.6) ---
+
+  it('mounts the winner stage at `finished` and at no other state', () => {
+    // Anchored on the confetti OVERLAY, which only WinnerStage renders and
+    // which it renders unconditionally — an `h1` count would really be an
+    // assertion about the question and reveal stages, which render one too,
+    // and a bare DOM count would move the day another stage grows an element
+    // for an unrelated reason (4.5's rule).
+    //
+    // Deliberately not `.stage-confetti-piece` (code review, 2026-08-14):
+    // that class is applied only when motion is allowed, so a "did the stage
+    // mount" assertion resting on it silently also asserts
+    // `reducedMotion === false`. It happens to hold here — matchMedia is
+    // mocked to false and the fixture's displaySettings say so too — but it
+    // would fail on a correct implementation the moment either changed, and
+    // its zero-length half would pass for any stage that rendered pieces
+    // without animating them. The overlay is the motion-independent fact.
+    //
+    // currentQuestion is nulled deliberately: FinishGame resets
+    // current_question_position to 0, so a real `finished` frame never
+    // carries one. This is the shell-level half of derived requirement 5 —
+    // the stage has to render a winner from exactly this frame shape.
+    vi.useFakeTimers()
+    vi.setSystemTime(baseNow)
+    try {
+      const finishedFrame: LobbySnapshot = {
+        ...snap(question(), 'finished'),
+        currentQuestion: null,
+        leaderboard: board(['a', 'b']),
+      }
+      const { container, rerender } = renderWith(finishedFrame)
+      expect(container.querySelectorAll('.pointer-events-none')).toHaveLength(1)
+      expect(container.querySelector('h1')?.textContent).toBe('PLAYER-a')
+      // The animation is a separate claim from the mount, so it gets its own
+      // assertion rather than being smuggled into the anchor above.
+      expect(container.querySelectorAll('.stage-confetti-piece')).toHaveLength(22)
+
+      for (const state of [
+        'draft',
+        'lobby',
+        'question_open',
+        'question_closed',
+        'revealed',
+        'leaderboard',
+      ] as const) {
+        deliver(rerender, { ...snap(question(), state), leaderboard: board(['a', 'b']) })
+        expect(container.querySelectorAll('.pointer-events-none')).toHaveLength(0)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
