@@ -38,10 +38,13 @@ interface PrimaryAction {
   path: string
 }
 
-// The one CTA per state this story reaches — "revealed"'s "שאלה הבאה" is
-// also the Leaderboard-skip path (UJ-4); this story never builds a control
-// that enters the leaderboard state (see story Dev Notes). "finished" has
-// no primary action — ControlPage renders a placeholder for it instead.
+// The one CTA per state whose label is a constant — `revealed`'s
+// nextQuestionCta is also the Leaderboard-skip path (UJ-4), and story 4.5
+// kept it exactly as story 3.1 resolved it, because epic 4.5's AC-2 depends
+// on that staying true. "leaderboard" is deliberately absent: its label
+// carries the next question's number and so cannot live in a static map
+// (see nextPosition below). "finished" has no primary action — ControlPage
+// renders a placeholder for it instead.
 const primaryActionByState: Record<string, PrimaryAction> = {
   question_open: { label: strings.live.closeQuestionCta, path: 'close-question' },
   question_closed: { label: strings.live.revealCta, path: 'reveal' },
@@ -49,15 +52,36 @@ const primaryActionByState: Record<string, PrimaryAction> = {
 }
 
 // States "עצור" is offered from — every state where a live round is
-// actually running (see story Dev Notes: not from lobby, nothing running
-// yet to abort).
-const stoppableStates = new Set(['question_open', 'question_closed', 'revealed'])
+// actually running (see story 3.1's Dev Notes: not from lobby, nothing
+// running yet to abort). "leaderboard" joined in story 4.5, per
+// EXPERIENCE.md's "Between questions" row, and the backend widened its own
+// guard to match.
+const stoppableStates = new Set(['question_open', 'question_closed', 'revealed', 'leaderboard'])
 
 // Renders the live-control surface for every game state past lobby. Reads
 // snapshot as a prop only — no own data fetching, so it shares the single
 // useGameSocket subscription LobbyPage already opened.
 export function ControlPage({ gameId, snapshot }: ControlPageProps) {
-  const primary = primaryActionByState[snapshot.state]
+  // EXPERIENCE.md's Host-control-panel table calls this state "Between
+  // questions" and gives it a numbered CTA (strings.live.openQuestionNumberCta)
+  // — the one CTA in that table carrying a number, which is why this state
+  // cannot live in the static map above. Same POST as `revealed`'s skip:
+  // next-question opens position+1, or finishes the game when there is no
+  // such question (game.Engine.NextQuestion owns that fork). On the LAST
+  // question there is no number to name, so the label falls back to
+  // strings.live.nextQuestionCta — the identical button, doing the identical
+  // thing it already does at `revealed`.
+  const nextPosition = (snapshot.currentQuestion?.position ?? 0) + 1
+  const primary: PrimaryAction | undefined =
+    snapshot.state === 'leaderboard'
+      ? {
+          label:
+            nextPosition <= snapshot.questionCount
+              ? strings.live.openQuestionNumberCta(nextPosition)
+              : strings.live.nextQuestionCta,
+          path: 'next-question',
+        }
+      : primaryActionByState[snapshot.state]
 
   const action = useMutation({
     mutationFn: (path: string) => api<void>(`/api/games/${gameId}/${path}`, { method: 'POST' }),
@@ -74,6 +98,19 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
   const gradingIncomplete = action.error instanceof ApiError && action.error.code === 'GRADING_INCOMPLETE'
 
   const fire = useSingleFlight(action)
+
+  // The one persistent focusable control on this panel. The Leaderboard CTA
+  // below is rendered only at `revealed`, so activating it unmounts the very
+  // element that has focus and the browser drops focus to <body> — measured,
+  // not theorised (story 4.5's browser pass). Two things follow, and the
+  // second is why this ref exists rather than the item staying a note: a
+  // keyboard or screen-reader Organizer loses their position mid-game, AND
+  // the panel's advance key stays live with nothing focused to show what it
+  // will do, because useSpaceAction fires precisely when
+  // activeElement === body. Handing focus back to this button restores the
+  // invariant the whole panel is built on — the control Space activates is
+  // the control that visibly has focus. (Code review, 2026-08-12.)
+  const primaryRef = useRef<HTMLButtonElement>(null)
 
   useSpaceAction(() => {
     if (primary) fire(primary.path)
@@ -172,12 +209,36 @@ export function ControlPage({ gameId, snapshot }: ControlPageProps) {
             break AC-4's focus-retention requirement on every click.
             Double-fire is instead guarded inside fire()'s ref. */}
         <Button
+          ref={primaryRef}
           onClick={() => primary && fire(primary.path)}
           disabled={!primary}
           className="h-10 bg-green-800 text-ink-on-dark hover:bg-green-900"
         >
           {primary?.label ?? ''}
         </Button>
+
+        {/* The Leaderboard entry (story 4.5), offered only at `revealed` —
+            EXPERIENCE.md's State Patterns table gives that row "Next /
+            Leaderboard". It fires through the SAME `action` mutation and
+            the same fire(), so it inherits 3.11's single-flight guard and
+            the error banner above with no new state of its own. It is
+            deliberately NOT bound to Space: UX-DR10 allows exactly one
+            primary action per state, and the primary here stays the UJ-4
+            skip.
+            Focus is handed to the primary button because this one is about
+            to unmount — see primaryRef above for why that is not cosmetic. */}
+        {snapshot.state === 'revealed' && (
+          <Button
+            variant="outline"
+            className="h-10 border-host-border text-green-800"
+            onClick={() => {
+              fire('show-leaderboard')
+              primaryRef.current?.focus()
+            }}
+          >
+            {strings.live.showLeaderboardCta}
+          </Button>
+        )}
 
         {stoppableStates.has(snapshot.state) && (
           <AlertDialog>

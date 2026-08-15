@@ -145,6 +145,18 @@ export const strings = {
     revealCta: 'גלה תשובה',
     nextQuestionCta: 'שאלה הבאה ←',
     stopCta: 'עצור',
+    // [ASSUMPTION]: EXPERIENCE.md's State Patterns table gives the Reveal
+    // row's host options as "Next / Leaderboard", but the Host-microcopy
+    // table has no row for a Leaderboard CTA, so the wording is authored
+    // here. 'טבלת התוצאות' matches display.stateAnnouncement.leaderboard
+    // and results.leaderboardTitle character for character, so all three
+    // surfaces name one thing one way.
+    showLeaderboardCta: 'טבלת התוצאות',
+    // EXPERIENCE.md's Host-control-panel table, "Between questions" row:
+    // "פתח שאלה [N]" — the only CTA in that table carrying a number, and
+    // the reason the leaderboard state cannot reuse the static
+    // primaryActionByState map (see control-page.tsx).
+    openQuestionNumberCta: (n: number) => `פתח שאלה ${n}`,
     // [ASSUMPTION]: EXPERIENCE.md specifies the confirm-stop dialog exists
     // but not its copy — flagged for Avraham to confirm/replace.
     stopConfirmTitle: 'לעצור את המשחק?',
@@ -308,6 +320,60 @@ export const strings = {
       // reused: that one is a table COLUMN HEADER on the dashboard and a
       // later copy change to either surface must not silently move the other.
       correctStat: (count: number) => `${count} צדקו`,
+    },
+    // Leaderboard stage (story 4.5).
+    leaderboard: {
+      // DESIGN.md leaderboard-row-mover: "▲ + places climbed". One
+      // constant so the glyph cannot drift, the same discipline as
+      // reveal.correctMark.
+      moverMark: '▲',
+      // [ASSUMPTION]: UX-DR14 requires the indicator to be aria-labeled
+      // but gives no wording. Noun form so there is no gendered verb
+      // (A2: 'עלה' is masculine); the singular is spelled out for the
+      // same reason results.playerCountLabel spells out 'משתתף אחד'.
+      climbedLabel: (places: number) =>
+        places === 1 ? 'עלייה של מקום אחד' : `עלייה של ${places} מקומות`,
+      // [ASSUMPTION]: reachable — a game can be started and played with
+      // no registered players (nothing gates start on a roster), and
+      // GetLeaderboard then returns zero rows. Distinct from the degraded
+      // frame, which renders display.waiting instead (story 4.5, derived
+      // requirement 8). Impersonal, matching results.noPlayers rather
+      // than restating it: that one is a dashboard empty state and a
+      // later copy change to either must not move the other.
+      noPlayers: 'אף אחד לא נרשם למשחק הזה.',
+    },
+    // Winner takeover (story 4.6). Mirrors messages_he.go's Winner's-final-
+    // message tone ("מזל טוב, [שם]! 🏆 ניצחת עם [ניקוד] נקודות!") without
+    // repeating its exact wording — the projector composes name and score as
+    // separate visual elements (mockups/key-stage-winner.html), not one
+    // interpolated sentence.
+    winner: {
+      // mockups/key-stage-winner.html's w-tagline, verbatim. Gender/number
+      // neutral, so it needs no tie/no-tie variant.
+      tagline: 'מזל טוב!',
+      // [ASSUMPTION]: no score-suffix string exists yet for the display
+      // surface (messages_he.go's templates interpolate "X נקודות" inline
+      // in Go, not as a reusable fragment). One function so the digit-plus-
+      // suffix cannot drift from results.playerCountLabel's spelled-out-
+      // singular discipline elsewhere in this file — though a score has no
+      // natural "one point" singular concern the way a participant count
+      // does, so this is a plain suffix, not a pluralizing function.
+      //
+      // Rendered by winner-stage.tsx inside a PLAIN <bdi> (dir="auto"), not
+      // <bdi dir="ltr">: the composed value is a Hebrew sentence whose first
+      // strong character is Hebrew, so forcing LTR would mirror it and put
+      // the digits on the wrong side of the word. Auto isolates the run from
+      // its surroundings while resolving the direction correctly, and the
+      // digit run inside keeps its own LTR order by the bidi algorithm.
+      scoreSuffix: (score: number) => `${score} נקודות`,
+      // Distinct from display.leaderboard.noPlayers on purpose: that one
+      // describes an EMPTY roster; this one describes a roster where
+      // nobody's score cleared game/final.go's strict positivity condition
+      // (a stopped-before-first-reveal game, or genuinely nobody registered).
+      // Both collapse to "no winner to announce" and get one honest
+      // sentence, mirroring messages_he.go's msgFinalResultsNoWinner rather
+      // than inventing new wording for a case WhatsApp already names.
+      noWinner: 'המשחק נגמר! הפעם לא נצברו נקודות.',
     },
   },
 } as const

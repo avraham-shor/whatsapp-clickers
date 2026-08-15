@@ -228,9 +228,22 @@ func (s *Store) RevealCurrentQuestionAndAwardPoints(ctx context.Context, gameID,
 	return g, nil
 }
 
-// OpenNextQuestion transitions a game from revealed to question_open on the
-// question at position; a foreign/missing game, one not revealed, or one
-// with no question at position (including a lost race) is ErrNotFound.
+// ShowLeaderboard transitions a game from revealed to leaderboard (FR-13,
+// FR-18, story 4.5); a foreign/missing game or one not revealed (including a
+// lost race) is ErrNotFound. current_question_position deliberately does not
+// move — the Leaderboard is a pause on the question just revealed.
+func (s *Store) ShowLeaderboard(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
+	game, err := s.q.ShowLeaderboard(ctx, gen.ShowLeaderboardParams{ID: gameID, OrganizerID: organizerID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.Game{}, ErrNotFound
+	}
+	return game, err
+}
+
+// OpenNextQuestion transitions a game from revealed or leaderboard to
+// question_open on the question at position; a foreign/missing game, one in
+// neither source state, or one with no question at position (including a lost
+// race) is ErrNotFound.
 func (s *Store) OpenNextQuestion(ctx context.Context, gameID, organizerID string, position int32) (gen.Game, error) {
 	game, err := s.q.OpenNextQuestion(ctx, gen.OpenNextQuestionParams{ID: gameID, OrganizerID: organizerID, Position: position})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -240,8 +253,8 @@ func (s *Store) OpenNextQuestion(ctx context.Context, gameID, organizerID string
 }
 
 // FinishGame transitions a game to finished from any of question_open,
-// question_closed, or revealed; a foreign/missing game or one in another
-// state (including a lost race) is ErrNotFound.
+// question_closed, revealed, or leaderboard; a foreign/missing game or one in
+// another state (including a lost race) is ErrNotFound.
 func (s *Store) FinishGame(ctx context.Context, gameID, organizerID string) (gen.Game, error) {
 	game, err := s.q.FinishGame(ctx, gen.FinishGameParams{ID: gameID, OrganizerID: organizerID})
 	if errors.Is(err, pgx.ErrNoRows) {

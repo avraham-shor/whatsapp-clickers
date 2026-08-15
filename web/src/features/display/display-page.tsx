@@ -4,10 +4,13 @@ import { useParams } from 'react-router'
 import { strings } from '@/lib/strings.he'
 import { useGameSocket } from '@/lib/use-game-socket'
 import type { GameState, LobbySnapshot } from '@/lib/types'
+import { LeaderboardStage } from './leaderboard-stage'
 import { LobbyStage } from './lobby-stage'
 import { QuestionStage } from './question-stage'
 import { RevealStage } from './reveal-stage'
 import { StagePlaceholder } from './stage-placeholder'
+import { useLeaderboardMemory } from './use-leaderboard-memory'
+import { WinnerStage } from './winner-stage'
 // The contract lives in its own module (story 4.3) and is deliberately NOT
 // re-exported from here: a `export type { StageProps } from './stage-props'`
 // would preserve the very import path whose value form recreates the cycle.
@@ -23,8 +26,8 @@ const stageByState: Record<GameState, ComponentType<StageProps>> = {
   question_open: QuestionStage, // story 4.3 — question stage
   question_closed: QuestionStage, // story 4.3 — question stage (timer at 0)
   revealed: RevealStage, // story 4.4 — reveal stage
-  leaderboard: StagePlaceholder, // story 4.5 — leaderboard stage
-  finished: StagePlaceholder, // story 4.6 — winner takeover
+  leaderboard: LeaderboardStage, // story 4.5 — leaderboard stage
+  finished: WinnerStage, // story 4.6 — winner takeover
 }
 
 const reducedMotionQuery = '(prefers-reduced-motion: reduce)'
@@ -142,6 +145,13 @@ export function DisplayPage() {
       ? { ...rendered, currentQuestion: { ...currentQuestion, answeredCount: answeredFloor.count } }
       : rendered
 
+  // The ranking this window last showed the room, remembered across the
+  // stage remount so the Leaderboard can mark who climbed (story 4.5).
+  // `rendered` and NOT `stageSnapshot`: the two differ only in the
+  // answeredCount floor, which has nothing to do with the leaderboard, and
+  // reading the un-rewritten frame keeps the two mechanisms independent.
+  const previousStandings = useLeaderboardMemory(gameId, rendered)
+
   // Optional-chained even though the field is non-optional in LobbySnapshot:
   // store/migrate.go documents redeploys briefly running two instances, so a
   // new bundle whose socket lands on a still-draining old instance receives a
@@ -203,7 +213,11 @@ export function DisplayPage() {
           key={`${rendered.gameId}:${rendered.state}`}
           className="stage-fade flex w-full flex-1 flex-col items-center justify-center"
         >
-          <Stage snapshot={stageSnapshot} reducedMotion={reducedMotion} />
+          <Stage
+            snapshot={stageSnapshot}
+            reducedMotion={reducedMotion}
+            previousStandings={previousStandings}
+          />
         </div>
       )}
 

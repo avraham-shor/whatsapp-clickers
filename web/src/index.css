@@ -274,6 +274,50 @@
      across the bar track - the two changes are the belt and the braces and
      should be kept together. */
   --stage-bar-label: 16vw;
+
+  /* DESIGN.md components.leaderboard-row minHeight: 72px. 3.75vw = 72px
+     at 1920; the 6.6667vh term is the same fit guard --stage-option-min
+     and --stage-timer-ring carry - equal at 16:9, so every measured
+     value at both verified resolutions is unchanged and min() only
+     engages on a viewport shorter than 16:9.
+
+     Used as an EXACT height, not a minimum, and that is load bearing
+     rather than stylistic: the reshuffle below translates a row by a
+     whole number of row heights (story 4.5, derived requirement 11),
+     which is only exact while every row is the same height. It is also
+     why the display name is single-line and truncated.
+
+     Fit: ten rows = 720px inside a 984px content box at 1920x1080
+     (1080 minus two --stage-margin), and 480px inside 656px at
+     1280x720. If the board looks lost on the screen, raising this
+     toward 5vw (96px, the --stage-option-min step) is the sanctioned
+     adjustment - the 1080p headroom allows up to ~98px rows - and it
+     must be re-measured at BOTH resolutions, because 720p is the
+     binding one (see the --stage-bar-label note above). */
+  --stage-leaderboard-row: min(3.75vw, 6.6667vh);
+
+  /* DESIGN.md components.winner-card.name: "{typography.display},
+     projection-large" — larger than --stage-display (96px, the timer
+     numeral), which is the biggest text ANY other stage renders.
+     mockups/key-stage-winner.html's .w-name is 6.5cqw = 124.8px at 1920;
+     cqw needs only a unit rename to vw at this project's 1920 design
+     width (the mockup's own comment: "1cqw = 19.2px at the 1920px design
+     width" — no container-type is declared anywhere in this codebase, so
+     vw is the direct equivalent). 11.5556vh = 124.8px at 1080p, exactly
+     equal to 6.5vw at 1920x1080 — the same fit-guard shape every other
+     large ramp step in this file already uses, engaging only below 16:9.
+
+     The coefficient is 6.5 * 16/9, the rule every other step in this file
+     follows exactly (9->16, 11.4583->20.3704, 5->8.8889, 3.75->6.6667).
+     Story 4.6 shipped 11.5741 — that is 125.0px at 1080p, derived from the
+     mockup's ROUNDED 125px rather than from 6.5vw's true 124.8px, and it
+     made this the only inexact member of the pattern (code review,
+     2026-08-14).
+
+     The tagline and the score need NO new ramp value: the mockup's
+     2.0833cqw (40px) and 2.5cqw (48px) land exactly on the existing
+     --stage-body and --stage-ui steps. */
+  --stage-winner-name: min(6.5vw, 11.5556vh);
 }
 
 /* The stage cross-fade (EXPERIENCE.md: <=300ms, instant when reduced).
@@ -339,6 +383,90 @@
     transform-origin: 100% 50%;
     animation: stage-bar-grow 400ms ease-out both;
   }
+
+  /* The Leaderboard reshuffle (EXPERIENCE.md Audience Display stages:
+     "The reshuffle animation is explicitly in the reduced-motion list -
+     static reordering when reduced").
+
+     Every row is exactly --stage-leaderboard-row tall, so a row's travel
+     is a whole number of ROW HEIGHTS and translateY(N * 100%) expresses
+     it exactly - no FLIP measurement, no getBoundingClientRect, no ref
+     (react-hooks/refs forbids reading one during render anyway), and
+     nothing a jsdom test cannot see. --stage-row-shift is set inline per
+     row as a unitless row count; POSITIVE means the row starts BELOW its
+     final slot, i.e. it climbed.
+
+     No transform-origin: this is a translate, not a scale. Unlike
+     .stage-bar-grow above, where the origin IS the direction.
+
+     The 300ms DELAY is the point of the stage, not padding: the board
+     arrives holding the order the room last saw, the shell's 300ms
+     cross-fade finishes, and only THEN does it reshuffle. Without it
+     the movement happens underneath the fade and the room never sees
+     where anyone came from - which is the whole spectacle EXPERIENCE.md
+     calls "the reshuffle". 300ms + 600ms = 900ms, inside NFR-1's 1s
+     transition budget.
+
+     fill-mode `backwards`, NOT `both`, and here it is load bearing
+     rather than tidy: `backwards` is what holds the `from` transform
+     through the delay. Without it the rows would paint in their FINAL
+     order for 300ms and then jump backwards to start - the animation
+     playing in reverse, visibly. `both` would additionally pin a
+     transform on every row forever, making each one a containing block
+     for anything positioned inside it later (deferred-work.md carries
+     an open note about .stage-bar-grow's `both` for exactly that - do
+     not "make them consistent" by copying the older one).
+
+     Layered for the same reason .stage-fade / .stage-timer-sweep /
+     .stage-bar-grow are (code review, 2026-08-09).
+
+     Deliberately NO prefers-reduced-motion rule: killed from the
+     reducedMotion PROP (story 4.5's derived requirement 12) so a unit
+     test can see it and so the Organizer's room-level toggle - which is
+     not a media query at all - works. */
+  .stage-row-reshuffle {
+    animation: stage-row-reshuffle 600ms ease-out 300ms backwards;
+  }
+
+  /* The winner-card celebration (DESIGN.md components.winner-card.
+     celebration: "CSS geometric confetti, gold + green-600, no images").
+     Transcribed from mockups/key-stage-winner.html's .cf/@keyframes drift,
+     cqw renamed to vw (story 4.6, derived requirement 11 - no scaling
+     change, a straight rename).
+
+     Deliberately NO prefers-reduced-motion rule here, unlike the mockup's
+     own @media block: every animated stage before this one (4.3's ring
+     sweep, 4.4's bar grow, 4.5's row reshuffle) kills its animation from
+     the reducedMotion PROP instead, for the same two reasons recorded at
+     each of them - a CSS-only kill is invisible to jsdom, and the
+     Organizer's room-level toggle is not a media query at all. The class
+     below is applied conditionally in JSX exactly as .stage-row-reshuffle
+     is.
+
+     Layered for consistency with every other rule in this block, NOT
+     because this one has a cascade conflict to resolve: it declares only
+     animation-name / -timing-function / -iteration-count, and no width,
+     height or background utility declares any of those. The "an unlayered
+     rule would outrank the w-/h-/bg- utilities" reasoning is true of the
+     rules above and was carried over to this one, where it is not (code
+     review, 2026-08-14). Keep it layered anyway - a future declaration
+     added here should not have to re-derive the question.
+
+     The rule carries the ANIMATION ONLY, not `position: absolute` - unlike
+     the mockup's .cf, which bundles both. Load bearing rather than tidy:
+     this class is removed under reduced motion, so a bundled `position`
+     would drop all 22 pieces back into normal flow at exactly the moment
+     the spec asks for a "static celebratory frame". The pieces carry
+     `absolute` as their own utility instead, always. */
+  .stage-confetti-piece {
+    animation-name: stage-confetti-drift;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    /* duration and delay are per-piece and are set inline, the same shape
+       --stage-row-shift uses for per-row data. The mockup's own scattered
+       start offsets - all NEGATIVE delays - are what makes the frame read
+       as already in motion rather than as 22 pieces dropping in unison. */
+  }
 }
 
 @keyframes stage-fade-in {
@@ -375,4 +503,43 @@
    bar settles at its inline width with nothing to keep in sync. */
 @keyframes stage-bar-grow {
   from { transform: scaleX(0); }
+}
+
+/* Only a `from`: the implicit `to` is the row's own position, so it
+   settles in its real slot with nothing to keep in sync - the same shape
+   as stage-bar-grow. The fallback in var() matters: a row with no shift
+   renders the class not at all, but a future caller that forgets the
+   inline property gets a no-op instead of an invalid transform that
+   drops the whole animation. */
+@keyframes stage-row-reshuffle {
+  from { transform: translateY(calc(var(--stage-row-shift, 0) * 100%)); }
+}
+
+/* mockups/key-stage-winner.html's @keyframes drift, renamed and with cqw
+   rewritten as vw. from AND to, unlike the three from-only keyframes above:
+   this is an infinite loop with no implicit settle state to fall back to,
+   so both ends have to be stated. Both ends are also plain, interpolable
+   values for the reason @keyframes stage-timer-deplete records at length -
+   a non-interpolable end degrades the whole animation to discrete.
+
+   The travel carries a fit guard, and unlike the ramp values above this one
+   is not decorative (code review, 2026-08-14). The mockup measured 60cqw
+   against .frame-shell, which declares container-type: inline-size around a
+   .stage locked to aspect-ratio: 16/9 - so the drift distance was ALWAYS
+   1.067x the stage's own height. Renamed to vw against a raw viewport, that
+   invariant is gone: the top-most piece (top: 8%) only clears the bottom
+   edge at the `to` end when W/H > 1.533. At 16:9 (1.778) every piece clears
+   at both ends, which is why the story's browser pass at 1920x1080 and
+   1280x720 - both exactly 16:9 - saw nothing. Below ~1.53:1 (4:3, 5:4,
+   portrait, a merely un-maximized window) at least one piece is still on
+   screen when this infinite loop snaps from `to` back to `from`, so it
+   teleports and its rotation jumps 300deg in a single frame, every 10-14s.
+   33.75vh = 60vw at 16:9, so the two terms are EQUAL at the design ratio
+   and nothing the browser pass measured changes; the guard engages only
+   below it. Same equal-at-16:9 shape as --stage-lobby-code,
+   --stage-timer-ring, --stage-option-min, --stage-leaderboard-row and
+   --stage-winner-name. */
+@keyframes stage-confetti-drift {
+  from { transform: translateY(calc(-1 * min(60vw, 33.75vh))) rotate(0deg); }
+  to   { transform: translateY(min(60vw, 33.75vh)) rotate(300deg); }
 }

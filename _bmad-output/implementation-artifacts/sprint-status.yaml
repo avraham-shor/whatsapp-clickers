@@ -1,5 +1,5 @@
 # generated: 2026-07-10
-# last_updated: 2026-08-12
+# last_updated: 2026-08-14
 # project: whatsapp-clickers
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-07-10
-last_updated: 2026-08-12
+last_updated: 2026-08-14
 
 # note: 3.7's baseline_commit predates 3.6's commit landing; 3.7 branches
 # from story/3-6-ai-semantic-validation-fail-closed (commit 7a4e55e), not main
@@ -90,6 +90,6 @@ development_status:
   4-2-lobby-stage-the-room-fills-the-screen: done
   4-3-question-stage-with-the-authoritative-timer: done
   4-4-reveal-stage-the-answer-marked: done
-  4-5-leaderboard-stage-the-room-reshuffles: backlog
-  4-6-winner-takeover: backlog
+  4-5-leaderboard-stage-the-room-reshuffles: done
+  4-6-winner-takeover: done
   epic-4-retrospective: optional

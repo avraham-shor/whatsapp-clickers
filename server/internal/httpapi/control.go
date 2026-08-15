@@ -16,6 +16,7 @@ type ControlEngine interface {
 	StartGame(ctx context.Context, gameID, organizerID string) (game.Snapshot, error)
 	CloseQuestion(ctx context.Context, gameID, organizerID string) (game.Snapshot, error)
 	Reveal(ctx context.Context, gameID, organizerID string) (game.Snapshot, int32, error)
+	ShowLeaderboard(ctx context.Context, gameID, organizerID string) (game.Snapshot, error)
 	NextQuestion(ctx context.Context, gameID, organizerID string) (game.Snapshot, error)
 	StopGame(ctx context.Context, gameID, organizerID string) (game.Snapshot, error)
 	PlayerRecipients(ctx context.Context, gameID string) ([]string, error)
@@ -283,6 +284,36 @@ func handleReveal(engine ControlEngine, hub SnapshotBroadcaster, dispatcher Resu
 		slog.Info("question revealed", "game_id", gameID, "organizer_id", organizerID, "position", position)
 		writeJSON(w, http.StatusOK, snapshot)
 		go dispatchAnswerRevealed(ctx, engine, dispatcher, gameID, organizerID, snapshot, position)
+	}
+}
+
+// handleShowLeaderboard enters the Leaderboard pause (FR-13, FR-18, story
+// 4.5) — the sixth and last live-game transition, and the only one that
+// takes NO dispatcher and fires NO WhatsApp traffic. That is deliberate,
+// not an omission: EXPERIENCE.md's State Patterns table gives the
+// Leaderboard row "— (quiet)" for WhatsApp, because every Participant
+// already received their personal result on the reveal that preceded it.
+// The Leaderboard is the room's screen, not the room's phones.
+func handleShowLeaderboard(engine ControlEngine, hub SnapshotBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		organizerID, ok := requireOrganizer(w, r)
+		if !ok {
+			return
+		}
+		gameID, ok := gameIDParam(w, r)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		snapshot, err := engine.ShowLeaderboard(ctx, gameID, organizerID)
+		if err != nil {
+			writeStoreError(w, err, "GAME_NOT_FOUND")
+			return
+		}
+		hub.Broadcast(gameID, snapshot)
+		slog.Info("leaderboard shown", "game_id", gameID, "organizer_id", organizerID)
+		writeJSON(w, http.StatusOK, snapshot)
 	}
 }
 
