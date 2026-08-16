@@ -90,13 +90,55 @@ func TestGradeFuzzy(t *testing.T) {
 
 		// --- Known residual of the chosen calibration ---
 		// Flagged in review, accepted deliberately: at 3-6 runes one edit
-		// is still tolerated, so a numeric or short-word answer in that
-		// band still accepts its nearest neighbour. Tightening further
-		// would cost genuine typo tolerance on ordinary short Hebrew
-		// words, so these are pinned as CURRENT behavior, not as desired
-		// behavior — revisit with NFR-9 evidence from the pilot.
-		{"RESIDUAL: a three-rune number still accepts its neighbour", "100", []string{"150"}, true},
+		// is still tolerated for WORD tokens, so a short-word answer in
+		// that band still accepts its nearest neighbour. Tightening
+		// further would cost genuine typo tolerance on ordinary short
+		// Hebrew words, so this is pinned as CURRENT behavior, not as
+		// desired behavior — revisit with NFR-9 evidence from the pilot.
+		// (The numeric sibling of this residual — "100" fuzzy-matching
+		// "150" — is NOT a residual; it was a production defect, fixed
+		// below by the numeric-token rule.)
 		{"RESIDUAL: a four-rune place name still accepts a shorter word", "סין", []string{"סיני"}, true},
+
+		// --- Numeric tokens require an exact match (production defect) ---
+		// Confirmed in a real game: accepted "150" fuzzy-graded "100" and
+		// "050" as correct, because a 3-rune numeric answer still fell in
+		// the length<=6/threshold=1 tier. A digit string has no letters
+		// left to anchor "same word, one typo" — every digit is fully
+		// load-bearing — so any all-digits token now requires an exact,
+		// same-position match; word tokens are unaffected (numericTokensMatch).
+		{"a numeric answer rejects a substituted neighbour (the reported defect)", "100", []string{"150"}, false},
+		{"a numeric answer rejects another substituted neighbour (the reported defect)", "050", []string{"150"}, false},
+		{"a numeric answer rejects a deletion that changes the value by a factor of 10", "50", []string{"150"}, false},
+		{"a numeric answer still matches itself exactly", "150", []string{"150"}, true},
+		{"a longer numeric answer still rejects a substituted neighbour", "1400", []string{"1500"}, false},
+		{"a mixed numeric+word answer rejects a wrong number even with the word intact", "100 שקלים", []string{"150 שקלים"}, false},
+		{"a mixed numeric+word answer still tolerates a word-level typo when the number is exact", "150 שקל", []string{"150 שקלים"}, true},
+
+		// --- Comma/period-grouped numbers merge into one numeric token
+		// (adversarial review of the fix above) ---
+		// Normalize turns "," and "." into spaces same as any other
+		// punctuation, so without merging, a thousands-separated
+		// Accepted Answer like "1,000" would token-split into "1" and
+		// "000" and reject a plainly-typed "1000" outright — a
+		// regression the pre-fix whole-string Levenshtein comparison
+		// did not have (it fuzzy-matched "1000" against "1,000" within
+		// threshold). numericTokens re-merges adjacent all-digits
+		// tokens so both spellings compare as one exact numeric token.
+		{"a comma-grouped accepted answer still matches the plain digit spelling", "1000", []string{"1,000"}, true},
+		{"a comma-grouped response still matches the plain digit accepted answer", "1,000", []string{"1000"}, true},
+		{"a comma-grouped answer still rejects a genuinely different number", "2000", []string{"1,000"}, false},
+		{"a comma-grouped answer in a mixed accepted answer still requires the exact value", "1500 שקלים", []string{"1,000 שקלים"}, false},
+
+		// --- Numeric-token alignment (adversarial review of the fix above) ---
+		{"a numeric token not in the first position still requires an exact match", "שקל 100", []string{"שקל 150"}, false},
+		{"a numeric token not in the first position still matches when exact", "שקל 150", []string{"שקל 150"}, true},
+		// numericTokensMatch only bounds-checks a response position it
+		// actually needs (a numeric accepted token); a missing trailing
+		// WORD token is caught by the ordinary whole-string Levenshtein
+		// distance afterward, not by the token gate itself — pinned here
+		// so that guarantee stays true if either check is ever touched.
+		{"a missing trailing word still fails on the overall length gap, even with the number exact", "150", []string{"150 שקלים"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
