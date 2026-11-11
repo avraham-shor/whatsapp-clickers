@@ -72,6 +72,12 @@ const (
 	AnswerFormatHint      AnswerOutcome = "format_hint"
 	AnswerTooLong         AnswerOutcome = "too_long"
 	AnswerClosed          AnswerOutcome = "closed"
+	// AnswerStale is a reply Meta redelivered after the question it was
+	// written for had passed. Distinct from AnswerClosed, and the distinction
+	// is the whole point: AnswerClosed is a timely answer that missed the
+	// cutoff of the question it is genuinely about, while AnswerStale is text
+	// about some earlier question that only reached us now.
+	AnswerStale AnswerOutcome = "stale"
 )
 
 // AnswerResult is RecordAnswer's success return. GameID and Snapshot are
@@ -158,13 +164,34 @@ func stripFormatMarks(s string) string {
 // resolves the "two different clocks for one authoritative receipt time"
 // item deferred from story 2.1's second-round review
 // (deferred-work.md) — mark that entry closed as part of this story.
-func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receivedAt time.Time) (AnswerResult, error) {
+// sentAt is Meta's own clock (wa.InboundMessage.SentAt) and is used for
+// exactly one thing: proving a message predates the question it would
+// otherwise be filed against. Zero means "unknown age" and waves through.
+// It never reaches the persisted received_at or the Speed Bonus ordering —
+// see the AnswerStale check below.
+func (e *Engine) RecordAnswer(ctx context.Context, phone, rawText string, receivedAt, sentAt time.Time) (AnswerResult, error) {
 	qc, err := e.store.GetOpenQuestionForPlayer(ctx, phone)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return AnswerResult{}, ErrNoOpenQuestion
 		}
 		return AnswerResult{}, err
+	}
+
+	// Staleness outranks every check below it, because those describe the
+	// QUESTION (is it open, has this player answered it) while this one
+	// describes the MESSAGE. The query above resolves phone's reply against
+	// whatever question sits at the game's current position — it has no way
+	// to know which question the sender was actually looking at — so a reply
+	// Meta redelivered late would otherwise be filed against, graded by, and
+	// (worse) consume the single allowed answer for a question the sender
+	// never saw. Returning before the insert is what keeps already_answered
+	// clean, so their real answer to the current question still lands.
+	//
+	// Fail open on a zero sentAt: an absent or unparseable Meta timestamp
+	// must degrade to today's behavior, never to a rejected answer.
+	if !sentAt.IsZero() && sentAt.Before(qc.QuestionOpenedAt) {
+		return AnswerResult{Outcome: AnswerStale}, nil
 	}
 
 	// Resolve closed/already-answered ahead of content-format validation

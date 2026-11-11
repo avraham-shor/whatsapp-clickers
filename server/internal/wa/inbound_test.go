@@ -56,6 +56,7 @@ type stubRegistrar struct {
 	recordAnswerPhone      string
 	recordAnswerRawText    string
 	recordAnswerReceivedAt time.Time
+	recordAnswerSentAt     time.Time
 }
 
 func (s *stubRegistrar) Join(ctx context.Context, joinCode, phone, profileName string) (game.JoinResult, error) {
@@ -73,11 +74,12 @@ func (s *stubRegistrar) Rename(ctx context.Context, phone, displayName string) (
 	return s.renameResult, s.renameErr
 }
 
-func (s *stubRegistrar) RecordAnswer(ctx context.Context, phone, rawText string, receivedAt time.Time) (game.AnswerResult, error) {
+func (s *stubRegistrar) RecordAnswer(ctx context.Context, phone, rawText string, receivedAt, sentAt time.Time) (game.AnswerResult, error) {
 	s.recordAnswerCalls++
 	s.recordAnswerPhone = phone
 	s.recordAnswerRawText = rawText
 	s.recordAnswerReceivedAt = receivedAt
+	s.recordAnswerSentAt = sentAt
 	return s.recordAnswerResult, s.recordAnswerErr
 }
 

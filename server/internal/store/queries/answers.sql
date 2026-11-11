@@ -52,7 +52,24 @@ SELECT g.id AS game_id, q.id AS question_id, q.type AS question_type,
        COALESCE(g.state = 'question_open' AND now() <= g.answer_cutoff_at, false)::boolean AS is_open,
        EXISTS (
            SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.participant_id = p.id
-       ) AS already_answered
+       ) AS already_answered,
+       -- question_opened_at inverts the identity OpenQuestion/NextQuestion
+       -- establish in games.sql: answer_cutoff_at = now() + time_limit_seconds
+       -- at the moment the question opens. It is the cutoff for messages that
+       -- PREDATE this question -- a reply Meta redelivered days late (it
+       -- retries undelivered webhooks for days, migration 00006) resolves
+       -- through this query to whatever question is current NOW, and without
+       -- this column there is nothing to prove it was written for a different
+       -- one. game.RecordAnswer compares Meta's send time against it.
+       --
+       -- Exact rather than a tuned threshold, and self-scaling to each
+       -- question's own timer. The identity holds for exactly as long as it
+       -- has to: CloseCurrentQuestion's LEAST(answer_cutoff_at, now()) shifts
+       -- answer_cutoff_at backwards on early close, which would make this
+       -- read too late -- but only for a question that is already closed, and
+       -- RecordAnswer's write-time guard requires state = 'question_open', so
+       -- a question whose value has been perturbed can never reach the insert.
+       (g.answer_cutoff_at - (q.time_limit_seconds || ' seconds')::interval)::timestamptz AS question_opened_at
 FROM participants p
 JOIN games g ON g.id = p.game_id
 JOIN questions q ON q.game_id = g.id AND q.position = g.current_question_position

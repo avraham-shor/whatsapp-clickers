@@ -38,7 +38,7 @@ func TestRecordAnswerNoOpenQuestionReturnsErrNoOpenQuestion(t *testing.T) {
 	st := &stubStore{getOpenQuestionForPlayerErr: store.ErrNotFound}
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	_, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now(), time.Time{})
 	if !errors.Is(err, ErrNoOpenQuestion) {
 		t.Fatalf("RecordAnswer() err = %v, want ErrNoOpenQuestion", err)
 	}
@@ -53,7 +53,7 @@ func TestRecordAnswerMCQDigitAccepted(t *testing.T) {
 			st := answerStub("mcq")
 			e := NewEngine(st, "+972 50-000-0000", nil)
 
-			result, err := e.RecordAnswer(context.Background(), testPhone, raw, time.Now())
+			result, err := e.RecordAnswer(context.Background(), testPhone, raw, time.Now(), time.Time{})
 			if err != nil {
 				t.Fatalf("RecordAnswer() err = %v, want nil", err)
 			}
@@ -74,7 +74,7 @@ func TestRecordAnswerMCQLetterAccepted(t *testing.T) {
 			st := answerStub("mcq")
 			e := NewEngine(st, "+972 50-000-0000", nil)
 
-			result, err := e.RecordAnswer(context.Background(), testPhone, raw, time.Now())
+			result, err := e.RecordAnswer(context.Background(), testPhone, raw, time.Now(), time.Time{})
 			if err != nil {
 				t.Fatalf("RecordAnswer() err = %v, want nil", err)
 			}
@@ -99,7 +99,7 @@ func TestRecordAnswerAlreadyAnsweredPreCheckSkipsFormatValidation(t *testing.T) 
 
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "not a valid option", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "not a valid option", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -133,7 +133,7 @@ func TestRecordAnswerClosedPreCheckSkipsFormatValidation(t *testing.T) {
 
 			e := NewEngine(st, "+972 50-000-0000", nil)
 
-			result, err := e.RecordAnswer(context.Background(), testPhone, tc.raw, time.Now())
+			result, err := e.RecordAnswer(context.Background(), testPhone, tc.raw, time.Now(), time.Time{})
 			if err != nil {
 				t.Fatalf("RecordAnswer() err = %v, want nil", err)
 			}
@@ -162,7 +162,7 @@ func TestRecordAnswerMCQUnparseableReturnsFormatHint(t *testing.T) {
 			st := answerStub("mcq")
 			e := NewEngine(st, "+972 50-000-0000", nil)
 
-			result, err := e.RecordAnswer(context.Background(), testPhone, raw, time.Now())
+			result, err := e.RecordAnswer(context.Background(), testPhone, raw, time.Now(), time.Time{})
 			if err != nil {
 				t.Fatalf("RecordAnswer() err = %v, want nil", err)
 			}
@@ -181,7 +181,7 @@ func TestRecordAnswerFreeTextWithinLimitAccepted(t *testing.T) {
 	e := NewEngine(st, "+972 50-000-0000", nil)
 	text := strings.Repeat("א", 200)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, text, time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, text, time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -198,7 +198,7 @@ func TestRecordAnswerFreeTextOverLimitReturnsTooLong(t *testing.T) {
 	e := NewEngine(st, "+972 50-000-0000", nil)
 	text := strings.Repeat("א", 201)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, text, time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, text, time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -214,7 +214,7 @@ func TestRecordAnswerFreeTextTrimsWhitespace(t *testing.T) {
 	st := answerStub("free_text")
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "  שלום  ", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "  שלום  ", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -231,7 +231,7 @@ func TestRecordAnswerAlreadyAnsweredMapsToOutcome(t *testing.T) {
 	st.recordAnswerErr = store.ErrAlreadyAnswered
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -245,7 +245,7 @@ func TestRecordAnswerClosedMapsToOutcome(t *testing.T) {
 	st.recordAnswerErr = store.ErrNotFound
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -259,7 +259,7 @@ func TestRecordAnswerStoreErrorPropagates(t *testing.T) {
 	st.recordAnswerErr = errors.New("boom")
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	_, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	_, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now(), time.Time{})
 	if err == nil {
 		t.Fatal("RecordAnswer() err = nil, want a propagated error")
 	}
@@ -270,7 +270,7 @@ func TestRecordAnswerPassesReceivedAtThrough(t *testing.T) {
 	e := NewEngine(st, "+972 50-000-0000", nil)
 	receivedAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	_, err := e.RecordAnswer(context.Background(), testPhone, "1", receivedAt)
+	_, err := e.RecordAnswer(context.Background(), testPhone, "1", receivedAt, time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -287,7 +287,7 @@ func TestRecordAnswerAcceptedIncludesBroadcastSnapshot(t *testing.T) {
 	st := answerStub("mcq")
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -306,7 +306,7 @@ func TestRecordAnswerMCQCorrectSetsIsCorrectTrue(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.CorrectOption = 2
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "2", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "2", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -326,7 +326,7 @@ func TestRecordAnswerMCQIncorrectSetsIsCorrectFalse(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.CorrectOption = 2
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -346,7 +346,7 @@ func TestRecordAnswerFreeTextExactMatchSetsIsCorrectTrue(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים", "ירושלים עיר הקודש"}
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "ירושלים", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "ירושלים", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -373,7 +373,7 @@ func TestRecordAnswerFreeTextNoMatchLeavesGradePending(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -396,7 +396,7 @@ func TestRecordAnswerFreeTextFuzzyMatchSetsIsCorrectTrue(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "ירוסלים", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "ירוסלים", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -471,7 +471,7 @@ func TestRecordAnswerAIGraderReceivesQuestionContext(t *testing.T) {
 	grader := &fakeAIGrader{correct: true}
 	st, e := aiPathStub(grader)
 
-	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{}); err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
 	if grader.calls != 1 {
@@ -502,7 +502,7 @@ func TestRecordAnswerNoAIGraderLeavesRowPending(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{}); err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
 	if st.updateAnswerGradeCalls != 0 {
@@ -519,7 +519,7 @@ func TestRecordAnswerAIPersistRetriesThenGivesUp(t *testing.T) {
 	st, e := aiPathStub(&fakeAIGrader{correct: true})
 	st.updateAnswerGradeErr = errors.New("connection reset")
 
-	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{}); err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil (the ack never depends on grading)", err)
 	}
 	if st.updateAnswerGradeCalls != gradePersistAttempts {
@@ -536,7 +536,7 @@ func TestRecordAnswerAIPersistRetriesThenGivesUp(t *testing.T) {
 func TestRecordAnswerAIGraderPanicIsContainedAndFailsClosed(t *testing.T) {
 	st, e := aiPathStub(panicAIGrader{})
 
-	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now()); err != nil {
+	if _, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{}); err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
 	if st.updateAnswerGradeCalls != 1 {
@@ -561,7 +561,7 @@ func (panicAIGrader) GradeAI(context.Context, string, []string, string) (bool, e
 func TestRecordAnswerFreeTextAIMatchSetsIsCorrectTrue(t *testing.T) {
 	st, e := aiPathStub(&fakeAIGrader{correct: true})
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -586,7 +586,7 @@ func TestRecordAnswerFreeTextAIMatchSetsIsCorrectTrue(t *testing.T) {
 func TestRecordAnswerFreeTextAIMissSetsIsCorrectFalseStageAI(t *testing.T) {
 	st, e := aiPathStub(&fakeAIGrader{correct: false})
 
-	_, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	_, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -608,7 +608,7 @@ func TestRecordAnswerFreeTextAIMissSetsIsCorrectFalseStageAI(t *testing.T) {
 func TestRecordAnswerFreeTextAIErrorFailsClosedToFuzzy(t *testing.T) {
 	st, e := aiPathStub(&fakeAIGrader{err: errors.New("ai unavailable")})
 
-	_, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now())
+	_, err := e.RecordAnswer(context.Background(), testPhone, "תל אביב", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -641,7 +641,7 @@ func TestRecordAnswerFreeTextIgnoresInvisibleFormatMarks(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.AcceptedAnswers = []string{"ירושלים"}
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, testRLM+"ירושלים"+testLRM, time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, testRLM+"ירושלים"+testLRM, time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -667,7 +667,7 @@ func TestRecordAnswerMCQIgnoresInvisibleFormatMarks(t *testing.T) {
 	st.getOpenQuestionForPlayerResult.CorrectOption = 2
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, testBOM+"2"+testRLM, time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, testBOM+"2"+testRLM, time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil", err)
 	}
@@ -689,7 +689,7 @@ func TestRecordAnswerAcceptedSnapshotBuildFailureSkipsBroadcast(t *testing.T) {
 	st.getGameByIDErr = errors.New("boom")
 	e := NewEngine(st, "+972 50-000-0000", nil)
 
-	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now())
+	result, err := e.RecordAnswer(context.Background(), testPhone, "1", time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("RecordAnswer() err = %v, want nil (the answer already committed)", err)
 	}

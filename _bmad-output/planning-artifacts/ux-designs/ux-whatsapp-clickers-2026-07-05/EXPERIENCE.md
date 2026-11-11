@@ -114,6 +114,7 @@ Placeholders: `[N]` question number · `[Q]` total questions · `[T]` time limit
 | Format hint (MCQ) | "כדי לענות שלחו אות (א–ד) או ספרה (1–4) — עוד יש זמן!" | Unparseable reply, question open |
 | Too long (Free-Text) | "התשובה ארוכה מדי — עד 200 תווים. שלחו שוב, בקצרה!" | >200 chars |
 | Question closed | "השאלה נסגרה — מתכוננים לשאלה הבאה!" | Late answer |
+| Message arrived late | "ההודעה נשלחה מזמן והגיעה באיחור — היא לא נספרה. אם עדיין רלוונטי, שלחו שוב." | A message Meta could not deliver when it was sent and redelivered later (Meta retries for days). Covers both an answer that predates the currently open question and a stale `JOIN`/`שם:`. Distinct from "Question closed", which is a *timely* answer arriving after the cutoff — this one never reached us at all in time |
 | Result — correct | "נכון! 🎉 +[ניקוד] נקודות\nמקום [דירוג] בטבלה" | Reveal; answered correctly, no bonus |
 | Result — correct + bonus | "נכון! 🎉 +[ניקוד] נקודות\n⚡ בונוס מהירות +[בונוס]\nמקום [דירוג] בטבלה" | Reveal; won a Speed Bonus (two emoji allowed, A20) |
 | Result — wrong | "לא נכון הפעם. התשובה: [תשובה נכונה]\nמקום [דירוג] בטבלה — עוד הכול פתוח!" | Reveal; mid-game `[A5]` |

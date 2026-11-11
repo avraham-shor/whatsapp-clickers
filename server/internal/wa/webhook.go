@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -42,6 +43,20 @@ type InboundMessage struct {
 	Type        string // Meta's messages[].type verbatim: "text", "image", "sticker", ...
 	TextBody    string // text.body for Type=="text"; empty otherwise
 	ReceivedAt  time.Time
+
+	// SentAt is Meta's own messages[].timestamp — when WhatsApp's servers
+	// received the message, NOT when the handset claims to have sent it and
+	// NOT when we processed it. Zero means "unknown age": Meta omitted the
+	// field or it would not parse. Every staleness check MUST treat zero as
+	// unknown and fail open, so a parsing bug can never silence the chat.
+	//
+	// This exists solely to detect replays. Meta retries undelivered
+	// webhooks for days (migration 00006), and ReceivedAt cannot tell a
+	// live message from a four-day-old one — both are stamped "now". It is
+	// deliberately NOT the receipt clock and never reaches answers.received_at
+	// or the Speed Bonus ordering: FR-7's authoritative clock stays ours,
+	// because a sender-influenced timestamp must not decide who wins.
+	SentAt time.Time
 }
 
 // Deduper records a WhatsApp message ID as processed, reporting whether
@@ -227,9 +242,28 @@ type metaMessage struct {
 	From string `json:"from"`
 	ID   string `json:"id"`
 	Type string `json:"type"`
-	Text struct {
+	// Timestamp is Unix seconds as a STRING — Meta sends "1755386968", not
+	// 1755386968. Typed as string rather than int64 on purpose: an int64
+	// field would make json.Unmarshal record an UnmarshalTypeError for every
+	// message in the batch, which processPayload treats as a partial decode.
+	Timestamp string `json:"timestamp"`
+	Text      struct {
 		Body string `json:"body"`
 	} `json:"text"`
+}
+
+// parseMetaTimestamp converts Meta's Unix-seconds string into a UTC time.
+// It reports ok=false for an absent or unparseable value; callers must then
+// treat the age as unknown and process the message normally.
+func parseMetaTimestamp(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	secs, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(secs, 0).UTC(), true
 }
 
 // processPayload parses the envelope and dispatches every messages[] entry.
@@ -298,6 +332,17 @@ func (h *webhookHandler) processMessage(ctx context.Context, contacts []metaCont
 	}
 	if m.Type == "text" {
 		msg.TextBody = m.Text.Body
+	}
+	if sentAt, ok := parseMetaTimestamp(m.Timestamp); ok {
+		msg.SentAt = sentAt
+	} else {
+		// Left zero, which every staleness check reads as "unknown age" and
+		// waves through. Logged because Meta supplies this field on every
+		// real message: a run of these means the payload shape moved and the
+		// replay guard has quietly stopped guarding, which is otherwise
+		// indistinguishable from healthy traffic.
+		h.logger.Warn("inbound message has no usable timestamp, age unknown",
+			"wa_message_id", WaMessageIDDigest(m.ID), "type", msg.Type)
 	}
 
 	// Meta always supplies a message id; an empty one is a malformed payload.

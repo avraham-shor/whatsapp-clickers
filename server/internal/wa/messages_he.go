@@ -26,6 +26,7 @@ package wa
 //	Format hint (MCQ)        -> story 3.3 (below)
 //	Too long (Free-Text)     -> story 3.3 (below)
 //	Question closed          -> story 3.3 (below)
+//	Message arrived late     -> spec-stale-webhook-replay (below)
 //	Result - correct         -> story 3.8 (below)
 //	Result - correct + bonus -> story 3.8 (below)
 //	Result - wrong           -> story 3.8 (below)
@@ -219,6 +220,25 @@ const msgQuestionClosed = "השאלה נסגרה — מתכוננים לשאלה
 
 func questionClosedMessage() string {
 	return msgQuestionClosed
+}
+
+// msgStaleMessage is the Message-arrived-late row. Sent when Meta could not
+// deliver a message when it was sent and redelivered it later — Meta retries
+// undelivered webhooks for days, so a message can surface long after the
+// moment it was written for.
+//
+// Deliberately NOT msgQuestionClosed, though both answer a reply that will
+// not be scored. "Question closed" tells a Participant their *timely* answer
+// missed the cutoff — a fact about the question. This one tells them their
+// message never reached us in time at all — a fact about the message — and
+// it is the only one of the two that is also correct for a stale JOIN or
+// name change, which have no question in the picture. Reusing the closed
+// copy here would tell someone who sent a JOIN days ago that "the question
+// closed", naming a question they never saw.
+const msgStaleMessage = "ההודעה נשלחה מזמן והגיעה באיחור — היא לא נספרה. אם עדיין רלוונטי, שלחו שוב."
+
+func staleMessageReply() string {
+	return msgStaleMessage
 }
 
 // msgResultCorrectTemplate is the Result — correct row (no Speed Bonus).

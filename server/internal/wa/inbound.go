@@ -25,8 +25,23 @@ type Replier interface {
 type Registrar interface {
 	Join(ctx context.Context, joinCode, phone, profileName string) (game.JoinResult, error)
 	Rename(ctx context.Context, phone, displayName string) (game.RenameResult, error)
-	RecordAnswer(ctx context.Context, phone, rawText string, receivedAt time.Time) (game.AnswerResult, error)
+	RecordAnswer(ctx context.Context, phone, rawText string, receivedAt, sentAt time.Time) (game.AnswerResult, error)
 }
+
+// staleMessageAge is how far behind our receipt Meta's send time may fall
+// before a non-answer message (JOIN, name change) is refused as a replay.
+// Answers do NOT use this budget — they get an exact rule instead, keyed to
+// the current question's own open time (game.RecordAnswer). A coarse gate is
+// unavoidable here only because a JOIN has no question window to be measured
+// against.
+//
+// Five minutes is generous, and safe because of what the gap measures.
+// Meta's timestamp is stamped when WhatsApp's servers received the message,
+// not when the handset sent it, so this delta is always OUR delivery failure
+// (a redeploy, an outage, a dead callback URL) and never a Participant's
+// connectivity — someone whose phone was off for an hour is unaffected,
+// because Meta never held their message during that hour.
+const staleMessageAge = 5 * time.Minute
 
 var _ Registrar = (*game.Engine)(nil)
 
@@ -176,6 +191,27 @@ func (r *InboundRouter) Handle(ctx context.Context, msg InboundMessage) {
 		return
 	}
 
+	// Refuse a replay before it can touch any state. Placed ahead of
+	// classify() because the decision is about the message's age, not its
+	// content: a JOIN, a name change and a bare word are all equally
+	// meaningless when they were written five minutes ago and only arrived
+	// now. Answers are the deliberate exception — they pass through here and
+	// are judged by the exact rule in game.RecordAnswer, which can be
+	// stricter than this budget (a message younger than staleMessageAge can
+	// still predate the current question) and, unlike this gate, is keyed to
+	// the question the sender was actually looking at.
+	//
+	// Zero SentAt means Meta gave us no usable timestamp; wave it through.
+	if !msg.SentAt.IsZero() && msg.ReceivedAt.Sub(msg.SentAt) > staleMessageAge {
+		r.replier.Enqueue(msg.From, staleMessageReply())
+		r.logger.Info("stale message refused",
+			"age_seconds", int(msg.ReceivedAt.Sub(msg.SentAt).Seconds()),
+			"type", msg.Type,
+			"phone_last4", PhoneLast4(msg.From),
+			"wa_message_id", WaMessageIDDigest(msg.WaMessageID))
+		return
+	}
+
 	kind := classify(msg)
 	switch kind {
 	case kindJoin:
@@ -206,7 +242,7 @@ func (r *InboundRouter) Handle(ctx context.Context, msg InboundMessage) {
 // always asks the engine first; ErrNoOpenQuestion degrades to exactly
 // today's kindText behavior.
 func (r *InboundRouter) handleTextOrAnswer(ctx context.Context, msg InboundMessage) {
-	result, err := r.registrar.RecordAnswer(ctx, msg.From, msg.TextBody, msg.ReceivedAt)
+	result, err := r.registrar.RecordAnswer(ctx, msg.From, msg.TextBody, msg.ReceivedAt, msg.SentAt)
 	if errors.Is(err, game.ErrNoOpenQuestion) {
 		r.replier.Enqueue(msg.From, replyFor(kindText))
 		r.logger.Info("universal reply queued",
@@ -243,6 +279,11 @@ func (r *InboundRouter) handleTextOrAnswer(ctx context.Context, msg InboundMessa
 		reply = tooLongMessage()
 	case game.AnswerClosed:
 		reply = questionClosedMessage()
+	case game.AnswerStale:
+		// Deliberately not questionClosedMessage(): the sender's answer never
+		// reached the question it was written for, so naming "the question"
+		// would point them at one they never saw.
+		reply = staleMessageReply()
 	default:
 		reply = helpMessage()
 	}
